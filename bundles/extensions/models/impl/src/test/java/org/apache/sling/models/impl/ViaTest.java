@@ -16,10 +16,11 @@
  */
 package org.apache.sling.models.impl;
 
-import static org.mockito.Mockito.*;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 import java.util.Collections;
+import java.util.Hashtable;
 
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.sling.api.SlingHttpServletRequest;
@@ -34,7 +35,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.Constants;
 import org.osgi.service.component.ComponentContext;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -57,11 +57,13 @@ public class ViaTest {
     @Before
     public void setup() {
         when(componentCtx.getBundleContext()).thenReturn(bundleContext);
+        when(componentCtx.getProperties()).thenReturn(new Hashtable<String, Object>());
+
         when(request.getResource()).thenReturn(resource);
         factory = new ModelAdapterFactory();
         factory.activate(componentCtx);
-        factory.bindInjector(new ValueMapInjector(),
-                Collections.<String, Object> singletonMap(Constants.SERVICE_ID, 0L));
+        factory.bindInjector(new ValueMapInjector(), new ServicePropertiesMap(1, 1));
+        factory.adapterImplementations.addClassesAsAdapterAndImplementation(ViaModel.class);
     }
 
     @Test

@@ -18,8 +18,8 @@ package org.apache.sling.ide.artifacts.impl;
 
 import java.net.URL;
 
-import org.apache.sling.ide.artifacts.EmbeddedArtifactLocator;
 import org.apache.sling.ide.artifacts.EmbeddedArtifact;
+import org.apache.sling.ide.artifacts.EmbeddedArtifactLocator;
 import org.osgi.framework.BundleContext;
 import org.osgi.service.component.ComponentContext;
 
@@ -40,7 +40,7 @@ public class ArtifactsLocatorImpl implements EmbeddedArtifactLocator {
 
         BundleContext bundleContext = context.getBundleContext();
 
-        String version = "0.0.1.SNAPSHOT"; // TODO - remove version hardcoding
+        String version = "1.0.2"; // TODO - remove version hardcoding
         String artifactId = "org.apache.sling.tooling.support.install";
         String extension = "jar";
 
@@ -51,27 +51,18 @@ public class ArtifactsLocatorImpl implements EmbeddedArtifactLocator {
     }
 
     @Override
-    public EmbeddedArtifact[] loadSlingBundleArchetype() {
-
+    public EmbeddedArtifact loadSourceSupportBundle() {
+        
         BundleContext bundleContext = context.getBundleContext();
-
-        String version = "1.0.1-SNAPSHOT"; // TODO - remove version hardcoding
-        String artifactId = "sling-bundle-archetype";
+        
+        String version = "1.0.0"; // TODO - remove version hardcoding
+        String artifactId = "org.apache.sling.tooling.support.source";
         String extension = "jar";
-
-        URL resourceUrl = loadResource(bundleContext, ARTIFACTS_LOCATION + "/archetypes/" + artifactId + "."
-                + extension);
-
-        EmbeddedArtifact jarArtifact = new EmbeddedArtifact(artifactId + "-" + version + "." + extension, version,
-                resourceUrl);
-
-        extension = "pom";
-        resourceUrl = loadResource(bundleContext, ARTIFACTS_LOCATION + "/archetypes/" + artifactId + "." + extension);
-
-        EmbeddedArtifact pomArtifact = new EmbeddedArtifact(artifactId + "-" + version + "." + extension, version,
-                resourceUrl);
-
-        return new EmbeddedArtifact[] { pomArtifact, jarArtifact };
+        
+        URL jarUrl = loadResource(bundleContext, ARTIFACTS_LOCATION + "/sling-tooling-support-source/" + artifactId
+                + "." + extension);
+        
+        return new EmbeddedArtifact(artifactId + "-" + version + "." + extension, version, jarUrl);
     }
 
     private URL loadResource(BundleContext bundleContext, String resourceLocation) {

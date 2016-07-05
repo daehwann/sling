@@ -58,30 +58,6 @@ public class ScriptBindingsValuesProviderTest extends RenderingTestBase {
         }
     }
 
-    public void testGroovyProvider() throws IOException {
-        final String toDelete = uploadTestScript("bindingsprovided.groovy","html.groovy");
-        try {
-            final String content = getContent(displayUrl + ".html", CONTENT_TYPE_HTML);
-            assertTrue("Content includes Groovy marker (" + content + ")",content.contains("Groovy template"));
-            assertTrue("Content includes test text (" + content + ")", content.contains("Hello World!"));
-            assertTrue("Content includes Groovy-specific test text (" + content + ")", content.contains("Hello World from Groovy!"));
-        } finally {
-            testClient.delete(toDelete);
-        }
-    }
-
-    public void testGSPProvider() throws IOException {
-        final String toDelete = uploadTestScript("bindingsprovided.gsp","html.gsp");
-        try {
-            final String content = getContent(displayUrl + ".html", CONTENT_TYPE_HTML);
-            assertTrue("Content includes GSP marker (" + content + ")",content.contains("GSP template"));
-            assertTrue("Content includes test text (" + content + ")", content.contains("Hello World!"));
-            assertTrue("Content includes Groovy-specific test text (" + content + ")", content.contains("Hello World from Groovy!"));
-        } finally {
-            testClient.delete(toDelete);
-        }
-    }
-
     public void testJSPProvider() throws IOException {
         final String toDelete = uploadTestScript("bindingsprovided.jsp","html.jsp");
         try {

@@ -21,12 +21,12 @@
     <parent>
         <groupId>org.apache.sling</groupId>
         <artifactId>sling</artifactId>
-        <version>18</version>
-        <relativePath>../../../parent/pom.xml</relativePath>
+        <version>26</version>
+        <relativePath />
     </parent>
 
     <artifactId>org.apache.sling.auth.form</artifactId>
-    <version>1.0.5-SNAPSHOT</version>
+    <version>1.0.9-SNAPSHOT</version>
     <packaging>bundle</packaging>
 
     <name>Apache Sling Form Based Authentication Handler</name>
@@ -158,6 +158,19 @@
             <scope>provided</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.jackrabbit</groupId>
+            <artifactId>oak-core</artifactId>
+            <version>1.0.0</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.felix</groupId>
+            <artifactId>org.apache.felix.jaas</artifactId>
+            <version>0.0.2</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Test Dependencies -->
         <dependency>
             <groupId>junit</groupId>
@@ -170,6 +183,24 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.easymock</groupId>
+            <artifactId>easymock</artifactId>
+            <version>3.4</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-module-junit4</artifactId>
+            <version>1.6.4</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-api-easymock</artifactId>
+            <version>1.6.4</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

@@ -20,6 +20,8 @@ package org.apache.sling.api.resource;
 
 import java.util.Iterator;
 
+import javax.annotation.Nonnull;
+
 /**
  * The <code>ResourceWrapper</code> is a wrapper for any <code>Resource</code>
  * delegating all method calls to the wrapped resource by default. Extensions of
@@ -34,8 +36,9 @@ public class ResourceWrapper implements Resource {
     /**
      * Creates a new wrapper instance delegating all method calls to the given
      * <code>resource</code>.
+     * @param resource The resource to wrap
      */
-    public ResourceWrapper(final Resource resource) {
+    public ResourceWrapper(@Nonnull final Resource resource) {
         this.resource = resource;
     }
 
@@ -43,6 +46,7 @@ public class ResourceWrapper implements Resource {
      * Returns the <code>Resource</code> wrapped by this instance. This method
      * can be overwritten by subclasses if required. All methods implemented by
      * this class use this method to get the resource object.
+     * @return The resource wrapped by this instance.
      */
     public Resource getResource() {
         return resource;
@@ -52,6 +56,7 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getPath</code> on the
      * {@link #getResource() wrapped resource}.
      */
+    @Override
     public String getPath() {
         return getResource().getPath();
     }
@@ -60,8 +65,9 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getName</code> on the
      * {@link #getResource() wrapped resource}.
      *
-     * @since 2.1.0
+     * @since 2.1.0 (Sling API Bundle 2.1.0)
      */
+    @Override
     public String getName() {
         return getResource().getName();
     }
@@ -70,8 +76,9 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getParent</code> on the
      * {@link #getResource() wrapped resource}.
      *
-     * @since 2.1.0
+     * @since 2.1.0 (Sling API Bundle 2.1.0)
      */
+    @Override
     public Resource getParent() {
         return getResource().getParent();
     }
@@ -80,8 +87,9 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getChild</code> on the
      * {@link #getResource() wrapped resource}.
      *
-     * @since 2.1.0
+     * @since 2.1.0 (Sling API Bundle 2.1.0)
      */
+    @Override
     public Resource getChild(String relPath) {
         return getResource().getChild(relPath);
     }
@@ -90,8 +98,9 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>listChildren</code> on the
      * {@link #getResource() wrapped resource}.
      *
-     * @since 2.1.0
+     * @since 2.1.0 (Sling API Bundle 2.1.0)
      */
+    @Override
     public Iterator<Resource> listChildren() {
         return getResource().listChildren();
     }
@@ -99,6 +108,7 @@ public class ResourceWrapper implements Resource {
     /**
      * @see org.apache.sling.api.resource.Resource#getChildren()
      */
+    @Override
     public Iterable<Resource> getChildren() {
         return getResource().getChildren();
     }
@@ -107,6 +117,7 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getResourceMetadata</code> on the
      * {@link #getResource() wrapped resource}.
      */
+    @Override
     public ResourceMetadata getResourceMetadata() {
         return getResource().getResourceMetadata();
     }
@@ -115,6 +126,7 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getResourceResolver</code> on the
      * {@link #getResource() wrapped resource}.
      */
+    @Override
     public ResourceResolver getResourceResolver() {
         return getResource().getResourceResolver();
     }
@@ -123,6 +135,7 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getResourceType</code> on the
      * {@link #getResource() wrapped resource}.
      */
+    @Override
     public String getResourceType() {
         return getResource().getResourceType();
     }
@@ -131,6 +144,7 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>getResourceSuperType</code> on the
      * {@link #getResource() wrapped resource}.
      */
+    @Override
     public String getResourceSuperType() {
         return getResource().getResourceSuperType();
     }
@@ -138,19 +152,21 @@ public class ResourceWrapper implements Resource {
     /**
      * Returns the value of calling <code>hasChildren</code> on the
      * {@link #getResource() wrapped resource}.
-     * 
-     * @since 2.4.4
+     *
+     * @since 2.4.4  (Sling API Bundle 2.5.0)
      */
-	public boolean hasChildren() {
+	@Override
+    public boolean hasChildren() {
 		return getResource().hasChildren();
 	}
-    
+
     /**
      * Returns the value of calling <code>isResourceType</code> on the
      * {@link #getResource() wrapped resource}.
      *
-     * @since 2.1.0
+     * @since 2.1.0 (Sling API Bundle 2.1.0)
      */
+    @Override
     public boolean isResourceType(final String resourceType) {
         return getResource().isResourceType(resourceType);
     }
@@ -159,8 +175,17 @@ public class ResourceWrapper implements Resource {
      * Returns the value of calling <code>adaptTo</code> on the
      * {@link #getResource() wrapped resource}.
      */
+    @Override
     public <AdapterType> AdapterType adaptTo(Class<AdapterType> type) {
         return getResource().adaptTo(type);
+    }
+
+    /**
+     * @see org.apache.sling.api.resource.Resource#getValueMap()
+     */
+    @Override
+    public ValueMap getValueMap() {
+        return getResource().getValueMap();
     }
 
     /**
@@ -171,14 +196,10 @@ public class ResourceWrapper implements Resource {
      */
     @Override
     public String toString() {
-        final String className;
-        if (getClass().getSimpleName().length() == 0) {
-            className = getClass().getName();
-        } else {
-            className = getClass().getSimpleName();
-        }
+        final String simpleName = getClass().getSimpleName();
+        final String className = (simpleName.length() > 0) ? simpleName : getClass().getName();
         return className + ", type=" + getResourceType()
             + ", path=" + getPath() + ", resource=[" + getResource() + "]";
     }
-	
+
 }

@@ -19,22 +19,31 @@ package org.apache.sling.ide.eclipse.ui.wizards.np;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import org.apache.maven.archetype.catalog.Archetype;
 import org.apache.maven.archetype.catalog.ArchetypeCatalog;
+import org.apache.maven.artifact.versioning.ArtifactVersion;
+import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
+import org.apache.sling.ide.eclipse.m2e.internal.Activator;
+import org.apache.sling.ide.log.Logger;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.jface.operation.IRunnableWithProgress;
 import org.eclipse.jface.wizard.WizardPage;
+import org.eclipse.m2e.core.MavenPlugin;
 import org.eclipse.m2e.core.internal.MavenPluginActivator;
 import org.eclipse.m2e.core.internal.archetype.ArchetypeCatalogFactory;
 import org.eclipse.m2e.core.internal.archetype.ArchetypeManager;
+import org.eclipse.m2e.core.internal.index.IndexListener;
+import org.eclipse.m2e.core.repository.IRepository;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.ModifyEvent;
 import org.eclipse.swt.events.ModifyListener;
@@ -50,19 +59,56 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.DirectoryDialog;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
-import org.eclipse.swt.widgets.List;
 
 @SuppressWarnings("restriction")
-public class ChooseArchetypeWizardPage extends WizardPage {
+public class ChooseArchetypeWizardPage extends WizardPage implements IndexListener {
 	
-	private static final String LOADING_PLEASE_WAIT = "loading, please wait...";
-	private List knownArchetypesList;
-	private Map<String, Archetype> archetypesMap = new HashMap<String, Archetype>();
+    static final Comparator<String> ARTIFACT_KEY_COMPARATOR = new Comparator<String>() {
+        @Override
+        public int compare(String o1, String o2) {
+            
+            String[] gav1 = o1.split(" : ");
+            String[] gav2 = o2.split(" : ");
+            
+            // ensure we have sane values
+            if ( gav1.length != 3 || gav2.length != 3 ) {
+                return 0;
+            }
+            
+            // natural order by groupId
+            String groupId1 = gav1[0];
+            String groupId2 = gav2[0];
+            
+            int res = groupId1.compareTo(groupId2);
+            if ( res != 0 ) {
+                return res;
+            }
+            
+            // natural order by artifactId
+            String artifactId1 = gav1[1];
+            String artifactId2 = gav2[1];
+            
+            res = artifactId1.compareTo(artifactId2);
+            if ( res != 0 ) {
+                return res;
+            }
+            
+            // reverse order by version ( newest first )
+            ArtifactVersion version1 = new DefaultArtifactVersion(gav1[2]);
+            ArtifactVersion version2 = new DefaultArtifactVersion(gav2[2]);
+            
+            return version2.compareTo(version1);
+        }
+    };
+    
+    private static final String LOADING_PLEASE_WAIT = "loading, please wait...";
+    private Combo knownArchetypes;
+	private Map<String, Archetype> archetypesMap = new TreeMap<>(ARTIFACT_KEY_COMPARATOR);
 	private Button useDefaultWorkspaceLocationButton;
 	private Label locationLabel;
 	private Combo locationCombo;
 
-	public ChooseArchetypeWizardPage(AbstractNewSlingApplicationWizard parent) {
+	public ChooseArchetypeWizardPage(AbstractNewMavenBasedSlingApplicationWizard parent) {
 		super("chooseArchetypePage");
 		setTitle("Choose Project Location and Archetype");
 		setDescription("This step defines the project location and archetype");
@@ -70,8 +116,8 @@ public class ChooseArchetypeWizardPage extends WizardPage {
 	}
 
     @Override
-    public AbstractNewSlingApplicationWizard getWizard() {
-        return (AbstractNewSlingApplicationWizard) super.getWizard();
+    public AbstractNewMavenBasedSlingApplicationWizard getWizard() {
+        return (AbstractNewMavenBasedSlingApplicationWizard) super.getWizard();
     }
 
 	public void createControl(Composite parent) {
@@ -79,7 +125,7 @@ public class ChooseArchetypeWizardPage extends WizardPage {
 		GridLayout layout = new GridLayout();
 		container.setLayout(layout);
 		layout.numColumns = 3;
-		layout.verticalSpacing = 9;
+        layout.verticalSpacing = 9;
 
 	    useDefaultWorkspaceLocationButton = new Button(container, SWT.CHECK);
 	    GridData useDefaultWorkspaceLocationButtonData = new GridData(SWT.LEFT, SWT.CENTER, false, false, 3, 1);
@@ -141,16 +187,16 @@ public class ChooseArchetypeWizardPage extends WizardPage {
 		Label label = new Label(container, SWT.NULL);
 		label.setText("&Archetype:");
 
-		knownArchetypesList = new List(container, SWT.BORDER);
-		GridData gd = new GridData(GridData.FILL_HORIZONTAL);
-		knownArchetypesList.setLayoutData(gd);
-		knownArchetypesList.addSelectionListener(new SelectionAdapter() {
+        knownArchetypes = new Combo(container, SWT.DROP_DOWN | SWT.READ_ONLY);
+        GridData gd = new GridData(GridData.FILL_HORIZONTAL);
+        knownArchetypes.setLayoutData(gd);
+		knownArchetypes.addSelectionListener(new SelectionAdapter() {
 			@Override
 			public void widgetSelected(SelectionEvent e) {
 				dialogChanged();
 			}
 		});
-		knownArchetypesList.addMouseListener(new MouseAdapter() {
+		knownArchetypes.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mouseDoubleClick(MouseEvent e) {
 				getContainer().showPage(getNextPage());
@@ -158,17 +204,29 @@ public class ChooseArchetypeWizardPage extends WizardPage {
 		});
 		
 		setPageComplete(false);
+
+        MavenPlugin.getIndexManager().addIndexListener(this);
+
 		setControl(container);
 	}
 
+    @Override
+    public void dispose() {
+
+        MavenPlugin.getIndexManager().removeIndexListener(this);
+        super.dispose();
+    }
+
 	public Archetype getSelectedArchetype() {
-		String[] sel = knownArchetypesList.getSelection();
-		if (sel==null || sel.length!=1) {
-			return null;
-		}
-		String s = sel[0];
-		Archetype a = archetypesMap.get(s);
-		return a;
+
+        int idx = knownArchetypes.getSelectionIndex();
+        if (idx == -1) {
+            return null;
+        }
+
+        String archetype = knownArchetypes.getItem(idx);
+
+        return archetypesMap.get(archetype);
 	}
 	
     /*
@@ -179,7 +237,7 @@ public class ChooseArchetypeWizardPage extends WizardPage {
     @Override
     public void setVisible(boolean visible) {
         super.setVisible(visible);
-        if (visible && knownArchetypesList.getItemCount() == 0) {
+        if (visible && knownArchetypes.getItemCount() == 0) {
             // initialize as late as possible to take advantage of the error reporting
             // and progress from the parent wizard
             initialize();
@@ -187,65 +245,10 @@ public class ChooseArchetypeWizardPage extends WizardPage {
     }
 
 	private void initialize() {
-		knownArchetypesList.add(LOADING_PLEASE_WAIT);
+		knownArchetypes.add(LOADING_PLEASE_WAIT);
+        knownArchetypes.select(0);
 		try {
-            getContainer().run(true, false, new IRunnableWithProgress() {
-					
-				@Override
-				public void run(IProgressMonitor monitor) throws InvocationTargetException,
-						InterruptedException {
-					monitor.beginTask("discovering archetypes...", 5);
-				    ArchetypeManager manager = MavenPluginActivator.getDefault().getArchetypeManager();
-				    monitor.worked(1);
-					
-				    // optionally allow the parent to install any archetypes
-                    getWizard().installArchetypes();
-				    
-				    Collection<ArchetypeCatalogFactory> archetypeCatalogs = manager.getArchetypeCatalogs();
-				    monitor.worked(2);
-				    ArrayList<Archetype> list = new ArrayList<Archetype>();
-                    for (ArchetypeCatalogFactory catalogFactory : archetypeCatalogs) {
-				        try {
-                            ArchetypeCatalog catalog = catalogFactory.getArchetypeCatalog();
-                            @SuppressWarnings("unchecked")
-                            java.util.List<Archetype> arcs = catalog.getArchetypes();
-                            for (Archetype a : arcs) {
-                                if (a.getVersion().endsWith("SNAPSHOT")) {
-                                    System.out.println("got SNAPSHOT archetype " + a);
-                                }
-                            }
-
-				          if(arcs != null) {
-				            list.addAll(arcs);
-				          }
-                        } catch (CoreException ce) {
-                            throw new InvocationTargetException(ce);
-				        }
-				      }
-				    monitor.worked(1);
-                    for (Archetype archetype2 : list) {
-                        if (getWizard().acceptsArchetype(archetype2)) {
-                            String key = keyFor(archetype2);
-                            System.out.println("Got archetype match for archetype " + archetype2 + ", key " + key);
-                            archetypesMap.put(key, archetype2);
-                        }
-                    }
-
-				    monitor.worked(1);
-			        Display.getDefault().asyncExec(new Runnable() {
-			            public void run() {
-			            	Set<String> keys = archetypesMap.keySet();
-			            	knownArchetypesList.removeAll();
-                            for (String aKey : keys) {
-                                knownArchetypesList.add(aKey);
-                            }
-			            	knownArchetypesList.pack();
-			            }
-			          });
-			        monitor.done();
-
-				}
-			});
+            getContainer().run(true, false, new RefreshArchetypesRunnable());
 		} catch (InvocationTargetException e) {
             getWizard().reportError(e.getTargetException());
 		} catch (InterruptedException e) {
@@ -258,13 +261,13 @@ public class ChooseArchetypeWizardPage extends WizardPage {
 	}
 
 	private void dialogChanged() {
-		if (knownArchetypesList.getItemCount()==1 &&
-				knownArchetypesList.getItem(0).equals(LOADING_PLEASE_WAIT)) {
+		if (knownArchetypes.getItemCount()==1 &&
+				knownArchetypes.getItem(0).equals(LOADING_PLEASE_WAIT)) {
 			setErrorMessage(null);
 			setPageComplete(false);
 			return;
 		}
-		if (knownArchetypesList.getSelectionCount()!=1) {
+        if (knownArchetypes.getSelectionIndex() == -1) {
 			updateStatus("archetype must be selected");
 			return;
 		}
@@ -281,7 +284,6 @@ public class ChooseArchetypeWizardPage extends WizardPage {
 		setPageComplete(message == null);
 	}
 
-
 	public IPath getLocation() {
 		if (!useDefaultWorkspaceLocationButton.getSelection() && 
 				locationCombo.getText().length()>0) {
@@ -291,4 +293,120 @@ public class ChooseArchetypeWizardPage extends WizardPage {
 		}
 	}
 
+    @Override
+    public void indexAdded(IRepository repository) {
+
+    }
+
+    @Override
+    public void indexChanged(IRepository repository) {
+
+        Activator.getDefault().getPluginLogger()
+                .trace("Reloading archetypes as index for repository {0} has changed", repository);
+
+        try {
+            new RefreshArchetypesRunnable().run(new NullProgressMonitor());
+        } catch (final InvocationTargetException e) {
+            Display.getDefault().asyncExec(new Runnable() {
+                @Override
+                public void run() {
+                    if (isCurrentPage()) {
+                        setErrorMessage("Failed refreshing archetypes : " + e.getCause().getMessage());
+                    }
+                }
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @Override
+    public void indexRemoved(IRepository repository) {
+
+    }
+
+    @Override
+    public void indexUpdating(IRepository repository) {
+
+    }
+
+    class RefreshArchetypesRunnable implements IRunnableWithProgress {
+        @Override
+        public void run(IProgressMonitor monitor) throws InvocationTargetException, InterruptedException {
+
+            Logger logger = Activator.getDefault().getPluginLogger();
+
+            monitor.beginTask("Discovering archetypes...", 5);
+            ArchetypeManager manager = MavenPluginActivator.getDefault().getArchetypeManager();
+            monitor.worked(1);
+
+            // optionally allow the parent to install any archetypes
+            getWizard().installArchetypes();
+
+            Collection<ArchetypeCatalogFactory> archetypeCatalogs = manager.getArchetypeCatalogs();
+            monitor.worked(2);
+            ArrayList<Archetype> candidates = new ArrayList<>();
+            for (ArchetypeCatalogFactory catalogFactory : archetypeCatalogs) {
+                try {
+                    ArchetypeCatalog catalog = catalogFactory.getArchetypeCatalog();
+                    @SuppressWarnings("unchecked")
+                    java.util.List<Archetype> arcs = catalog.getArchetypes();
+
+                    logger.trace("Catalog factory {0} provided {1} archetypes", catalogFactory,
+                            arcs != null ? arcs.size() : 0);
+
+                    if (arcs != null) {
+                        candidates.addAll(arcs);
+                    }
+                } catch (CoreException ce) {
+                    throw new InvocationTargetException(ce);
+                }
+            }
+            monitor.worked(1);
+            boolean changed = false;
+
+            logger.trace("Considering {0} archetypes from {1} archetype catalogs", candidates.size(),
+                    archetypeCatalogs.size());
+
+            for (Archetype candidate : candidates) {
+                if (getWizard().acceptsArchetype(candidate)) {
+                    String key = keyFor(candidate);
+                    Archetype old = archetypesMap.put(key, candidate);
+
+                    logger.trace("Registered archetype {0}", candidate);
+
+                    if (old == null || !old.equals(candidate)) {
+                        changed = true;
+                    }
+
+                    logger.trace("Old archetype was {0}, changed = {1}", old, changed);
+                }
+            }
+
+            monitor.worked(1);
+            if (changed || archetypesMap.isEmpty()) {
+                logger.trace("Triggering refresh since changed is true");
+                Display.getDefault().asyncExec(new Runnable() {
+                    public void run() {
+                        Set<String> keys = archetypesMap.keySet();
+                        knownArchetypes.removeAll();
+                        for (String aKey : keys) {
+                            knownArchetypes.add(aKey);
+                        }
+                        knownArchetypes.pack();
+
+                        if (knownArchetypes.getItemCount() == 0) {
+                            setErrorMessage("No suitable archetypes found. Please make sure that the proper maven repositories are configured and indexes are up to date.");
+                        } else {
+                            knownArchetypes.select(0);
+                            updateStatus(null);
+                        }
+
+                    }
+                });
+            }
+            monitor.done();
+
+        }
+    }
 }

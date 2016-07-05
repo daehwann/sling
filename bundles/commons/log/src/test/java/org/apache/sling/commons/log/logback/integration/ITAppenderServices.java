@@ -45,6 +45,7 @@ import org.osgi.service.cm.ConfigurationAdmin;
 import org.slf4j.LoggerFactory;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.ops4j.pax.exam.CoreOptions.composite;
 import static org.ops4j.pax.exam.CoreOptions.mavenBundle;
@@ -87,6 +88,54 @@ public class ITAppenderServices extends LogTestBase {
 
         // One event should be logged.
         assertEquals(1, ta.events.size());
+    }
+
+    @Test
+    public void testRootAppenderService() throws Exception {
+        TestAppender ta = registerAppender("ROOT");
+        delay();
+
+        Logger root = (Logger)LoggerFactory.getLogger("ROOT");
+        root.setLevel(Level.DEBUG);
+        Logger foobar = (Logger)LoggerFactory.getLogger("foo.bar");
+        foobar.setLevel(Level.INFO);
+
+        root.debug("one");
+        foobar.debug("two");
+        foobar.info("three");
+
+        assertEquals(2, ta.events.size());
+    }
+
+    @Test
+    public void testAppenderServiceModified() throws Exception {
+        TestAppender ta = registerAppender("foo.bar", "foo.baz");
+        delay();
+
+        Logger bar = (Logger)LoggerFactory.getLogger("foo.bar");
+        bar.setLevel(Level.DEBUG);
+        Logger baz = (Logger)LoggerFactory.getLogger("foo.baz");
+        baz.setLevel(Level.INFO);
+
+        bar.debug("Test message");
+        baz.debug("Test message"); // Would not be logged
+
+        // One event should be logged.
+        assertEquals(1, ta.events.size());
+
+        ta.reset();
+
+        Dictionary<String, Object> props = new Hashtable<String, Object>();
+        props.put("loggers", new String[]{"foo.bar2"});
+        sr.setProperties(props);
+
+        delay();
+        LoggerFactory.getLogger("foo.bar2").info("foo.bar2");
+        LoggerFactory.getLogger("foo.baz").info("foo.baz");
+
+        assertEquals(1, ta.msgs.size());
+        assertTrue(ta.msgs.contains("foo.bar2"));
+        assertFalse(ta.msgs.contains("foo.baz"));
     }
 
     @Test
@@ -137,15 +186,22 @@ public class ITAppenderServices extends LogTestBase {
 
     private static class TestAppender extends AppenderBase<ILoggingEvent> {
         final List<ILoggingEvent> events = new ArrayList<ILoggingEvent>();
+        final List<String> msgs = new ArrayList<String>();
 
         @Override
         protected void append(ILoggingEvent eventObject) {
             events.add(eventObject);
+            msgs.add(eventObject.getFormattedMessage());
         }
 
         @Override
         public String getName() {
             return "TestAppender";
+        }
+
+        public void reset(){
+            events.clear();
+            msgs.clear();
         }
     }
 

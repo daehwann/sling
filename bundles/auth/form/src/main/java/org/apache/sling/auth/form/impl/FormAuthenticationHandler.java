@@ -36,7 +36,9 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
 import org.apache.commons.codec.binary.Base64;
+import org.apache.felix.jaas.LoginModuleFactory;
 import org.apache.felix.scr.annotations.Component;
+import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Properties;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.PropertyOption;
@@ -51,11 +53,12 @@ import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.api.resource.ResourceResolverFactory;
 import org.apache.sling.auth.core.AuthConstants;
 import org.apache.sling.auth.core.AuthUtil;
-import org.apache.sling.auth.core.spi.AbstractAuthenticationHandler;
 import org.apache.sling.auth.core.spi.AuthenticationHandler;
 import org.apache.sling.auth.core.spi.AuthenticationInfo;
 import org.apache.sling.auth.core.spi.DefaultAuthenticationFeedbackHandler;
 import org.apache.sling.auth.form.FormReason;
+import org.apache.sling.auth.form.impl.jaas.FormCredentials;
+import org.apache.sling.auth.form.impl.jaas.JaasHelper;
 import org.apache.sling.commons.osgi.OsgiUtil;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
@@ -71,12 +74,16 @@ import org.slf4j.LoggerFactory;
 @Component(label = "%auth.form.name", description = "%auth.form.description", metatype = true, name = "org.apache.sling.auth.form.FormAuthenticationHandler")
 @Properties( {
     @Property(name = Constants.SERVICE_DESCRIPTION, value = "Apache Sling Form Based Authentication Handler"),
-    @Property(name = Constants.SERVICE_VENDOR, value = "The Apache Software Foundation"),
     @Property(name = AuthenticationHandler.PATH_PROPERTY, value = "/", cardinality = 100),
     @Property(name = AuthenticationHandler.TYPE_PROPERTY, value = HttpServletRequest.FORM_AUTH, propertyPrivate = true),
-    @Property(name = Constants.SERVICE_RANKING, intValue = 0, propertyPrivate = false) })
+    @Property(name = Constants.SERVICE_RANKING, intValue = 0, propertyPrivate = false),
+
+    @Property(name = LoginModuleFactory.JAAS_CONTROL_FLAG, value = "sufficient"),
+    @Property(name = LoginModuleFactory.JAAS_REALM_NAME, value = "jackrabbit.oak"),
+    @Property(name = LoginModuleFactory.JAAS_RANKING, intValue = 1000)
+})
 @Service
-public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
+public class FormAuthenticationHandler extends DefaultAuthenticationFeedbackHandler implements AuthenticationHandler {
 
     /**
      * The name of the parameter providing the login form URL.
@@ -289,12 +296,14 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
      * The resource resolver factory used to resolve the login form as a resource
      */
     @Reference(policy = ReferencePolicy.DYNAMIC, cardinality = ReferenceCardinality.OPTIONAL_UNARY)
-    private ResourceResolverFactory resourceResolverFactory;
+    private volatile ResourceResolverFactory resourceResolverFactory;
 
     /**
      * If true the login form will be presented when the token expires.
      */
     private boolean loginAfterExpire;
+
+    private JaasHelper jaasHelper;
 
     /**
      * Extracts cookie/session based credentials from the request. Returns
@@ -303,6 +312,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
      * the secure user data is not present either in the cookie or an HTTP
      * Session.
      */
+    @Override
     public AuthenticationInfo extractCredentials(HttpServletRequest request,
             HttpServletResponse response) {
 
@@ -322,7 +332,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
                     // so that the invalid cookie isn't present on the authN
                     // operation.
                     authStorage.clear(request, response);
-                    if (this.loginAfterExpire || isValidateRequest(request)) {
+                    if (this.loginAfterExpire || AuthUtil.isValidateRequest(request)) {
                         // signal the requestCredentials method a previous login
                         // failure
                         request.setAttribute(FAILURE_REASON, FormReason.TIMEOUT);
@@ -346,6 +356,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
      * form. No further checks are applied, though, before sending back the
      * 403/FORBIDDEN response.
      */
+    @Override
     public boolean requestCredentials(HttpServletRequest request,
             HttpServletResponse response) throws IOException {
 
@@ -355,13 +366,13 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             return false;
         }
 
-        //check the referer to see if the request is for this handler
+        //check the referrer to see if the request is for this handler
         if (!AuthUtil.checkReferer(request, loginForm)) {
         	//not for this handler, so return
         	return false;
         }
 
-        final String resource = setLoginResourceAttribute(request,
+        final String resource = AuthUtil.setLoginResourceAttribute(request,
             request.getRequestURI());
 
         if (includeLoginForm && (resourceResolverFactory != null)) {
@@ -401,7 +412,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
         }
 
         try {
-            sendRedirect(request, response, loginForm, params);
+            AuthUtil.sendRedirect(request, response, request.getContextPath() + loginForm, params);
         } catch (IOException e) {
             log.error("Failed to redirect to the login form " + loginForm, e);
         }
@@ -413,6 +424,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
      * Clears all authentication state which might have been prepared by this
      * authentication handler.
      */
+    @Override
     public void dropCredentials(HttpServletRequest request,
             HttpServletResponse response) {
         authStorage.clear(request, response);
@@ -477,12 +489,25 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             	result = false;
             } else {
             	// check whether redirect is requested by the resource parameter
-            	final String resource = getLoginResource(request, null);
-            	if (resource != null) {
+            	final String targetResource = AuthUtil.getLoginResource(request, null);
+            	if (targetResource != null) {
             		try {
-            			response.sendRedirect(resource);
+            	        if (response.isCommitted()) {
+            	            throw new IllegalStateException("Response is already committed");
+            	        }
+            	        response.resetBuffer();
+
+            	        StringBuilder b = new StringBuilder();
+            	        if (AuthUtil.isRedirectValid(request, targetResource)) {
+            	            b.append(targetResource);
+            	        } else if (request.getContextPath().length() == 0) {
+            	            b.append("/");
+            	        } else {
+            	            b.append(request.getContextPath());
+            	        }
+            	        response.sendRedirect(b.toString());
             		} catch (IOException ioe) {
-            			log.error("Failed to send redirect to: " + resource, ioe);
+            			log.error("Failed to send redirect to: " + targetResource, ioe);
             		}
 
             		// terminate request, all done
@@ -593,8 +618,8 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
                 // as a POST request to the j_security_check page (unless
                 // the j_validate parameter is set); but only if this is not
                 // a validation request
-                if (!isValidateRequest(request)) {
-                    setLoginResourceAttribute(request, request.getContextPath());
+                if (!AuthUtil.isValidateRequest(request)) {
+                    AuthUtil.setLoginResourceAttribute(request, request.getContextPath());
                 }
             }
         }
@@ -610,7 +635,13 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
 
         final AuthenticationInfo info = new AuthenticationInfo(
             HttpServletRequest.FORM_AUTH, userId);
-        info.put(attrCookieAuthData, authData);
+
+        if (jaasHelper.enabled()) {
+            //JcrResourceConstants.AUTHENTICATION_INFO_CREDENTIALS
+            info.put("user.jcr.credentials", new FormCredentials(userId, authData));
+        } else {
+            info.put(attrCookieAuthData, authData);
+        }
 
         return info;
     }
@@ -631,6 +662,8 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             if (data instanceof String) {
                 return (String) data;
             }
+        } else if (credentials instanceof FormCredentials){
+            return ((FormCredentials) credentials).getAuthData();
         }
 
         // no SimpleCredentials or no valid attribute
@@ -641,7 +674,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
         return getCookieAuthData(credentials) != null;
     }
 
-    boolean isValid(final Credentials credentials) {
+    public boolean isValid(final Credentials credentials) {
         String authData = getCookieAuthData(credentials);
         if (authData != null) {
             return tokenStore.isValid(authData);
@@ -667,6 +700,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
 
         Dictionary<?, ?> properties = componentContext.getProperties();
 
+        this.jaasHelper = new JaasHelper(this, componentContext.getBundleContext(), properties);
         this.loginForm = OsgiUtil.toString(properties.get(PAR_LOGIN_FORM),
             AuthenticationFormServlet.SERVLET_PATH);
         log.info("Login Form URL {}", loginForm);
@@ -718,12 +752,14 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
         this.tokenStore = new TokenStore(tokenFile, sessionTimeout, fastSeed);
 
         this.loginModule = null;
-        try {
-            this.loginModule = FormLoginModulePlugin.register(this,
-                componentContext.getBundleContext());
-        } catch (Throwable t) {
-            log.info("Cannot register FormLoginModulePlugin. This is expected if Sling LoginModulePlugin services are not supported");
-            log.debug("dump", t);
+        if (!jaasHelper.enabled()) {
+            try {
+                this.loginModule = FormLoginModulePlugin.register(this,
+                        componentContext.getBundleContext());
+            } catch (Throwable t) {
+                log.info("Cannot register FormLoginModulePlugin. This is expected if Sling LoginModulePlugin services are not supported");
+                log.debug("dump", t);
+            }
         }
 
         this.includeLoginForm = OsgiUtil.toBoolean(properties.get(PAR_INCLUDE_FORM), DEFAULT_INCLUDE_FORM);
@@ -731,8 +767,13 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
         this.loginAfterExpire = OsgiUtil.toBoolean(properties.get(PAR_LOGIN_AFTER_EXPIRE), DEFAULT_LOGIN_AFTER_EXPIRE);
     }
 
-    protected void deactivate(
-            @SuppressWarnings("unused") ComponentContext componentContext) {
+    @Deactivate
+    protected void deactivate() {
+        if (jaasHelper != null){
+            jaasHelper.close();
+            jaasHelper = null;
+        }
+
         if (loginModule != null) {
             loginModule.unregister();
             loginModule = null;
@@ -857,6 +898,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             this.defaultCookieDomain = defaultCookieDomain;
         }
 
+        @Override
         public String extractAuthenticationInfo(HttpServletRequest request) {
             Cookie[] cookies = request.getCookies();
             if (cookies != null) {
@@ -880,6 +922,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             return null;
         }
 
+        @Override
         public void set(HttpServletRequest request,
                 HttpServletResponse response, String authData, AuthenticationInfo info) {
             // base64 encode to handle any special characters
@@ -905,6 +948,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             }
         }
 
+        @Override
         public void clear(HttpServletRequest request,
                 HttpServletResponse response) {
             Cookie oldCookie = null;
@@ -984,6 +1028,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             this.sessionAttributeName = sessionAttributeName;
         }
 
+        @Override
         public String extractAuthenticationInfo(HttpServletRequest request) {
             HttpSession session = request.getSession(false);
             if (session != null) {
@@ -995,6 +1040,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             return null;
         }
 
+        @Override
         public void set(HttpServletRequest request,
                 HttpServletResponse response, String authData, AuthenticationInfo info) {
             // store the auth hash as a session attribute
@@ -1002,6 +1048,7 @@ public class FormAuthenticationHandler extends AbstractAuthenticationHandler {
             session.setAttribute(sessionAttributeName, authData);
         }
 
+        @Override
         public void clear(HttpServletRequest request,
                 HttpServletResponse response) {
             HttpSession session = request.getSession(false);

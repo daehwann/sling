@@ -16,7 +16,6 @@
  */
 package org.apache.sling.ide.impl.vlt.filter;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -26,7 +25,6 @@ import org.apache.jackrabbit.vault.fs.config.DefaultWorkspaceFilter;
 import org.apache.jackrabbit.vault.fs.impl.AggregateManagerImpl;
 import org.apache.sling.ide.filter.Filter;
 import org.apache.sling.ide.filter.FilterResult;
-import org.apache.sling.ide.transport.RepositoryInfo;
 
 public class VltFilter implements Filter {
 
@@ -44,9 +42,7 @@ public class VltFilter implements Filter {
     }
 
     @Override
-    public FilterResult filter(File contentSyncRoot, String relativeFilePath, RepositoryInfo repositoryInfo) {
-        // TODO - is this the right check? I _think_ that filter paths are repository-based, not fs-based
-        // so this could be incorrect
+    public FilterResult filter(String relativeFilePath) {
 
         if (relativeFilePath.length() > 0 && relativeFilePath.charAt(0) != '/') {
             relativeFilePath = '/' + relativeFilePath;

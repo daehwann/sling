@@ -18,6 +18,9 @@
  */
 package org.apache.sling.api.security;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
 
@@ -77,34 +80,68 @@ public interface ResourceAccessSecurity {
      */
     String PROVIDER_CONTEXT = "provider";
 
-    /** If supplied Resource can be read, return it (or a wrapped
-     *  variant of it). The returned Resource should then be used
-     *  instead of the one that was passed into the method.
-     *  @return null if {@link Resource} cannot be read
+    /**
+     * If supplied Resource can be read, return it (or a wrapped
+     * variant of it). The returned Resource should then be used
+     * instead of the one that was passed into the method.
+     * @param resource The resource to test.
+     * @return null if {@link Resource} cannot be read
      */
-    Resource getReadableResource(Resource resource);
+    @CheckForNull Resource getReadableResource(Resource resource);
 
-    /** @return true if a {@link Resource} can be created at the supplied
-     *  absolute path. */
-    boolean canCreate(String absPathName, ResourceResolver resourceResolver);
+    /**
+     * Check whether a resource can be created at the path.
+     * @param absPathName The path to create
+     * @param resourceResolver The resource resolver
+     * @return true if a {@link Resource} can be created at the supplied
+     *  absolute path.
+     */
+    boolean canCreate(@Nonnull String absPathName, @Nonnull ResourceResolver resourceResolver);
 
-    /** @return true if supplied {@link Resource} can be updated */
-    boolean canUpdate(Resource resource);
+    /**
+     * Check whether a resource can be updated at the path.
+     * @param resource The resource to test.
+     * @return true if supplied {@link Resource} can be updated
+     */
+    boolean canUpdate(@Nonnull Resource resource);
 
-    /** @return true if supplied {@link Resource} can be deleted */
-    boolean canDelete(Resource resource);
+    /**
+     * Check whether a resource can be deleted at the path.
+     * @param resource The resource to test.
+     * @return true if supplied {@link Resource} can be deleted
+     */
+    boolean canDelete(@Nonnull Resource resource);
 
-    /** @return true if supplied {@link Resource} can be executed as a script */
-    boolean canExecute(Resource resource);
+    /**
+     * Check whether a resource can be executed at the path.
+     * @param resource The resource to test.
+     * @return true if supplied {@link Resource} can be executed as a script
+     */
+    boolean canExecute(@Nonnull Resource resource);
 
-    /** @return true if the "valueName" value of supplied {@link Resource} can be read */
-    boolean canReadValue(Resource resource, String valueName);
+    /**
+     * Check whether a value can be read
+     * @param resource The resource to test.
+     * @param valueName The name of the value
+     * @return true if the "valueName" value of supplied {@link Resource} can be read
+     */
+    boolean canReadValue(@Nonnull Resource resource, @Nonnull String valueName);
 
-    /** @return true if the "valueName" value of supplied {@link Resource} can be set */
-    boolean canSetValue(Resource resource, String valueName);
+    /**
+     * Check whether a value can be set
+     * @param resource The resource to test.
+     * @param valueName The name of the value
+     * @return true if the "valueName" value of supplied {@link Resource} can be set
+     */
+    boolean canSetValue(@Nonnull Resource resource, @Nonnull String valueName);
 
-    /** @return true if the "valueName" value of supplied {@link Resource} can be deleted */
-    boolean canDeleteValue(Resource resource, String valueName);
+    /**
+     * Check whether a value can be deleted
+     * @param resource The resource to test.
+     * @param valueName The name of the value
+     * @return true if the "valueName" value of supplied {@link Resource} can be deleted
+     */
+    boolean canDeleteValue(@Nonnull Resource resource, @Nonnull String valueName);
 
     /**
      * Optionally transform a query based on the current
@@ -119,9 +156,9 @@ public interface ResourceAccessSecurity {
      * @param language the language in which the query is expressed
      * @param resourceResolver the resource resolver which resolves the query
      * @return the transformed query
-     * @throws AccessSecurityException
+     * @throws AccessSecurityException If access is denied
      */
-    String transformQuery(String query, String language, ResourceResolver resourceResolver)
+    @Nonnull String transformQuery(@Nonnull String query, @Nonnull String language, @Nonnull ResourceResolver resourceResolver)
     throws AccessSecurityException;
 
 }

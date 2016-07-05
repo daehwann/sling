@@ -1,0 +1,12 @@
+.classpath
+.project
+target
+.settings
+.DS_Store
+pom.xml.releaseBackup
+release.properties
+pom.xml.tag
+pom.xml.next
+/frontend/node
+/frontend/node_modules
+/src/main/resources/SLING-INF/libs/sling/resource-editor-static-content/generated

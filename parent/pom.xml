@@ -21,14 +21,14 @@
     <parent>
         <groupId>org.apache</groupId>
         <artifactId>apache</artifactId>
-        <version>13</version>
+        <version>17</version>
         <relativePath />
     </parent>
 
     <groupId>org.apache.sling</groupId>
     <artifactId>sling</artifactId>
     <packaging>pom</packaging>
-    <version>19-SNAPSHOT</version>
+    <version>27-SNAPSHOT</version>
 
     <name>Apache Sling (Parent)</name>
     <description>The parent project for Apache Sling</description>
@@ -53,13 +53,14 @@
         <organization.logo>http://sling.apache.org/site/media.data/logo.png</organization.logo>
         <!--
             Java API and class file compliance. This property supports
-            one of two values:
-              - 5: Java 1.5 (default)
-              - 6: Java 6
+            one of three values:
+              - 6: Java 6 (default)
+              - 7: Java 7
+              - 8: Java 8
             Using anything else causes the set-bundle-required-execution-environment
             to fail the build with an exception
         -->
-        <sling.java.version>5</sling.java.version>
+        <sling.java.version>6</sling.java.version>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     </properties>
 
@@ -76,7 +77,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-                <version>2.9.1</version>
+                <version>2.10.2</version>
                 <reportSets>
                     <reportSet>
                         <reports>
@@ -92,12 +93,12 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-report-plugin</artifactId>
-                <version>2.15</version>
+                <version>2.18.1</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-changes-plugin</artifactId>
-                <version>2.9</version>
+                <version>2.11</version>
                 <reportSets>
                     <reportSet>
                         <reports>
@@ -116,7 +117,7 @@
     <build>
         <plugins>
 
-            <!-- Require Java 5 or higher for building -->
+            <!-- Require Java 7 or higher for building (as bnd since version 3.0 is built with Java 7) -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
@@ -131,9 +132,9 @@
                                 <requireJavaVersion>
                                     <message>
                                         Apache Sling must be compiled with Java
-                                        5 or higher
+                                        7 or higher
                                     </message>
-                                    <version>1.5.0</version>
+                                    <version>1.7.0</version>
                                 </requireJavaVersion>
                             </rules>
                         </configuration>
@@ -190,19 +191,26 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                             <target>
                                 <script language="javascript"> <![CDATA[
                                     var System = java.lang.System;
-                                    var bree = "J2SE-1.5";
+                                    var bree = "JavaSE-1.6";
+                                    var animalSnifferSignaturesVersion = "6";
                                     var slingJavaVersion = System.getProperty("sling.java.version");
                                     if (!slingJavaVersion) {
                                         slingJavaVersion = project.getProperty("sling.java.version");
                                     }
-                                    if (slingJavaVersion == "6") {
-                                        bree = "JavaSE-1.6";
+                                    if (slingJavaVersion == "7") {
+										animalSnifferSignaturesVersion = "7";
+                                        bree = "JavaSE-1.7";
 	                                    System.out.println("Setting Bundle-RequiredExecutionEnvironment=" + bree + " from sling.java.version=" + slingJavaVersion);
-                                    } else if (slingJavaVersion != "5") {
-                                        System.out.println("Unsupported sling.java.version=" + slingJavaVersion + "; must be 5 or 6.");
-                                        throw "sling.java.version must be 5 or 6";
+	                                } else if ( slingJavaVersion == "8") {
+                                        animalSnifferSignaturesVersion = "8";
+                                        bree = "JavaSE-1.8";
+	                                    System.out.println("Setting Bundle-RequiredExecutionEnvironment=" + bree + " from sling.java.version=" + slingJavaVersion);
+	                                } else if (slingJavaVersion != "6") {
+                                        System.out.println("Unsupported sling.java.version=" + slingJavaVersion + "; must be 6, 7 or 8.");
+                                        throw "sling.java.version must be 6, 7 or 8";
                                     }
                                     project.setProperty("sling.bree", bree);
+                                    project.setProperty("sling.animalSignatures.version", animalSnifferSignaturesVersion);
                                 ]]></script>
                             </target>
                         </configuration>
@@ -259,7 +267,6 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                     </execution>
                 </executions>
             </plugin>
-            <!-- Compile for Java 5 and higher -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -278,6 +285,42 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                     </tagBase>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.rat</groupId>
+                <artifactId>apache-rat-plugin</artifactId>
+                <configuration>
+                    <excludes combine.children="append">
+                        <!--  Used by maven-remote-resources-plugin -->
+                        <exclude>src/main/appended-resources/META-INF/*</exclude>
+                        <!--  Generated by maven-remote-resources-plugin -->
+                        <exclude>velocity.log</exclude>
+                        <!-- don't check anything in target -->
+                        <exclude>target/*</exclude>
+                        <!-- README files in markdown format -->
+                        <exclude>README.md</exclude>
+                        <!-- Ignore files generated bei IDE plugins e.g. maven-eclipse-plugin -->
+                        <exclude>maven-eclipse.xml</exclude>
+                        <exclude>.*</exclude>
+                        <exclude>.*/**</exclude>
+                        <!-- Exclude all JSON files -->
+                        <exclude>**/*.json</exclude>
+                        <!-- Generated for release source archives -->
+                        <exclude>DEPENDENCIES</exclude>
+                        <!-- .rej files from svn/patch -->
+                        <exclude>**/*.rej</exclude>
+                        <!-- Exclude Java crash log files -->
+                        <exclude>hs_err_*.log</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
 
         <pluginManagement>
@@ -285,17 +328,12 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                 <plugin>
                     <groupId>org.apache.sling</groupId>
                     <artifactId>maven-sling-plugin</artifactId>
-                    <version>2.1.0</version>
-                </plugin>
-                <plugin>
-                    <groupId>org.apache.sling</groupId>
-                    <artifactId>maven-launchpad-plugin</artifactId>
-                    <version>2.2.0</version>
+                    <version>2.1.8</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.sling</groupId>
                     <artifactId>maven-jspc-plugin</artifactId>
-                    <version>2.0.6</version>
+                    <version>2.0.8</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.sling</groupId>
@@ -303,9 +341,16 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                     <version>2.0.4-incubator</version>
                 </plugin>
                 <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <configuration>
+                        <retryFailedDeploymentCount>10</retryFailedDeploymentCount>
+                    </configuration>
+                </plugin>
+                <plugin>
                     <groupId>org.apache.felix</groupId>
                     <artifactId>maven-scr-plugin</artifactId>
-                    <version>1.14.0</version>
+                    <version>1.21.0</version>
                     <!-- As QDox is trying to inspect/load the classes
                          we have to add a slf4j implementation to the
                          class path of the plugin - we usually use
@@ -326,6 +371,7 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                                 <goal>scr</goal>
                             </goals>
                             <configuration>
+                                <strictMode>true</strictMode>
                                 <properties>
                                     <service.vendor>The Apache Software Foundation</service.vendor>
                                 </properties>
@@ -336,7 +382,7 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                 <plugin>
                     <groupId>org.apache.felix</groupId>
                     <artifactId>maven-bundle-plugin</artifactId>
-                    <version>2.4.0</version>
+                    <version>3.0.1</version>
                     <inherited>true</inherited>
                     <configuration>
                         <outputDirectory>${basedir}/target/classes</outputDirectory>
@@ -349,28 +395,38 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                             <Bundle-Vendor>The Apache Software Foundation</Bundle-Vendor>
                             <Bundle-SymbolicName>${project.artifactId}</Bundle-SymbolicName>
                             <Bundle-RequiredExecutionEnvironment>${sling.bree}</Bundle-RequiredExecutionEnvironment>
+                            <!-- Disable the new ScrPlugin for now -->
+                            <_plugin>org.apache.felix.bundleplugin.BlueprintPlugin,aQute.lib.spring.SpringXMLType</_plugin>
                         </instructions>
                     </configuration>
+                    <executions>
+                        <execution>
+                            <id>baseline</id>
+                            <goals>
+                                <goal>baseline</goal>
+                            </goals>
+                        </execution>
+                    </executions>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-dependency-plugin</artifactId>
-                    <version>2.8</version>
+                    <version>2.10</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-war-plugin</artifactId>
-                    <version>2.4</version>
+                    <version>2.6</version>
                 </plugin>
                 <plugin>
-                    <groupId>org.mortbay.jetty</groupId>
-                    <artifactId>maven-jetty-plugin</artifactId>
-                    <version>6.1.26</version>
+                    <groupId>org.apache.sling</groupId>
+                    <artifactId>slingstart-maven-plugin</artifactId>
+                    <version>1.3.6</version>
                 </plugin>
                 <plugin>
                     <groupId>org.codehaus.cargo</groupId>
                     <artifactId>cargo-maven2-plugin</artifactId>
-                    <version>1.4.3</version>
+                    <version>1.4.13</version>
                 </plugin>
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
@@ -385,11 +441,11 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>animal-sniffer-maven-plugin</artifactId>
-                    <version>1.9</version>
+                    <version>1.14</version>
                     <configuration>
                         <signature>
                             <groupId>org.codehaus.mojo.signature</groupId>
-                            <artifactId>java1${sling.java.version}</artifactId>
+                            <artifactId>java1${sling.animalSignatures.version}</artifactId>
                             <version>1.0</version>
                         </signature>
                     </configuration>
@@ -397,7 +453,7 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-antrun-plugin</artifactId>
-                    <version>1.7</version>
+                    <version>1.8</version>
                     <dependencies>
                         <!-- declare dependencies here rather than where needed to
                              circumvent http://jira.codehaus.org/browse/MANTRUN-51
@@ -418,7 +474,7 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>build-helper-maven-plugin</artifactId>
-                    <version>1.8</version>
+                    <version>1.9.1</version>
                 </plugin>
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
@@ -428,270 +484,12 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                 <plugin>
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
-                    <version>0.6.3.201306030806</version>
-                </plugin>
-                <!--This plugin's configuration is used to store Eclipse m2e settings only. It has no influence on the Maven build itself.-->
-                <plugin>
-                    <groupId>org.eclipse.m2e</groupId>
-                    <artifactId>lifecycle-mapping</artifactId>
-                    <version>1.0.0</version>
-                    <configuration>
-                        <lifecycleMappingMetadata>
-                            <pluginExecutions>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.maven.plugins
-                                        </groupId>
-                                        <artifactId>
-                                            maven-antrun-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [1.3,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>run</goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                         <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                <pluginExecutionFilter>
-                                    <groupId>
-                                        org.apache.maven.plugins
-                                    </groupId>
-                                    <artifactId>
-                                        maven-dependency-plugin
-                                    </artifactId>
-                                    <versionRange>
-                                        [2.2,)
-                                    </versionRange>
-                                    <goals>
-                                        <goal>copy-dependencies</goal>
-                                        <goal>unpack</goal>
-                                    </goals>
-                                </pluginExecutionFilter>
-                                <action>
-                                     <ignore />
-                                </action>
-                            </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.codehaus.groovy.maven
-                                        </groupId>
-                                        <artifactId>
-                                            gmaven-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [1.0,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>compile</goal>
-                                            <goal>testCompile</goal>
-                                            <goal>execute</goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.codehaus.mojo
-                                        </groupId>
-                                        <artifactId>
-                                            build-helper-maven-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [1.5,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>
-                                                reserve-network-port
-                                            </goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.sling
-                                        </groupId>
-                                        <artifactId>
-                                            maven-launchpad-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.0.10,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>prepare-package</goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.sling
-                                        </groupId>
-                                        <artifactId>
-                                            maven-jcrocm-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.0.4-incubator,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>ocm</goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.sling
-                                        </groupId>
-                                        <artifactId>
-                                            maven-sling-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.1.0,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>generate-adapter-metadata</goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.maven.plugins
-                                        </groupId>
-                                        <artifactId>
-                                            maven-dependency-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.2,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>
-                                                unpack-dependencies
-                                            </goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.maven.plugins
-                                        </groupId>
-                                        <artifactId>
-                                            maven-jar-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.3.1,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>
-                                                jar
-                                            </goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.sling
-                                        </groupId>
-                                        <artifactId>
-                                            maven-jspc-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.0.4,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>
-                                                jspc
-                                            </goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            net.alchim31.maven
-                                        </groupId>
-                                        <artifactId>
-                                            yuicompressor-maven-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [1.3.0,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>
-                                                compress
-                                            </goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                                <pluginExecution>
-                                    <pluginExecutionFilter>
-                                        <groupId>
-                                            org.scala-tools
-                                        </groupId>
-                                        <artifactId>
-                                            maven-scala-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.15.2,)
-                                        </versionRange>
-                                        <goals>
-                                            <goal>
-                                                compile
-                                            </goal>
-                                            <goal>
-                                                testCompile
-                                            </goal>
-                                        </goals>
-                                    </pluginExecutionFilter>
-                                    <action>
-                                        <ignore />
-                                    </action>
-                                </pluginExecution>
-                            </pluginExecutions>
-                        </lifecycleMappingMetadata>
-                    </configuration>
+                    <version>0.7.5.201505241946</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
-                    <version>2.16</version>
+                    <version>2.18.1</version>
                 </plugin>
             </plugins>
         </pluginManagement>
@@ -717,41 +515,6 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                                 <id>install-bundle</id>
                                 <goals>
                                     <goal>install</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-	    <!--
-	    We should execute this profile manually to make sure that all files in our source code contain proper licenses.
-	    This is very important and should not be skipped in any scenario.  It is very importnt for us to follow ASF policy.
-	    Example:  mvn -Prat prepare-release install
-	    -->
-        <profile>
-            <id>rat</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.rat</groupId>
-                        <artifactId>apache-rat-plugin</artifactId>
-                        <version>0.9</version>
-                        <configuration>
-                            <excludes>
-                                <!--  Used by maven-remote-resources-plugin -->
-                                <exclude>src/main/appended-resources/META-INF/*</exclude>
-                                <!--  Generated by maven-remote-resources-plugin -->
-                                <exclude>velocity.log</exclude>
-                                <!-- don't check anything in target -->
-                                <exclude>target/*</exclude>
-                            </excludes>
-                        </configuration>
-                        <executions>
-                            <execution>
-                                <phase>verify</phase>
-                                <goals>
-                                    <goal>check</goal>
                                 </goals>
                             </execution>
                         </executions>
@@ -843,17 +606,406 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
                                 <goals>
                                     <goal>prepare-agent</goal>
                                 </goals>
+                                <configuration>
+                                    <destFile>${project.build.directory}/jacoco-unit.exec</destFile>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>prepare-agent-integration</id>
+                                <goals>
+                                    <goal>prepare-agent-integration</goal>
+                                </goals>
+                                <configuration>
+                                    <destFile>${project.build.directory}/jacoco-it.exec</destFile>
+                                </configuration>
                             </execution>
                             <execution>
                                 <id>report</id>
-                                <phase>prepare-package</phase>
                                 <goals>
                                     <goal>report</goal>
                                 </goals>
+                                <configuration>
+                                    <dataFile>${project.build.directory}/jacoco-unit.exec</dataFile>
+                                    <outputDirectory> ${project.reporting.outputDirectory}/jacoco-unit</outputDirectory>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>report-integration</id>
+                                <goals>
+                                    <goal>report-integration</goal>
+                                </goals>
+                                <configuration>
+                                    <dataFile>${project.build.directory}/jacoco-it.exec</dataFile>
+                                    <outputDirectory> ${project.reporting.outputDirectory}/jacoco-it</outputDirectory>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>merge-unit-and-it</id>
+                                <phase>post-integration-test</phase>
+                                <goals>
+                                    <goal>merge</goal>
+                                </goals>
+                                <configuration>
+                                    <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                                    <fileSets>
+                                        <fileSet>
+                                            <directory>${project.build.directory}</directory>
+                                            <includes>
+                                                <include>jacoco-unit.exec</include>
+                                                <include>jacoco-it.exec</include>
+                                            </includes>
+                                        </fileSet>
+                                    </fileSets>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>report-merged</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>report</goal>
+                                </goals>
+                                <configuration>
+                                    <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                                    <outputDirectory> ${project.reporting.outputDirectory}/jacoco-merged</outputDirectory>
+                                </configuration>
                             </execution>
                         </executions>
                     </plugin>
                 </plugins>
+            </build>
+        </profile>
+
+        <!-- This plugin's configuration is used to store Eclipse m2e settings only. It has no influence on the Maven build itself. -->
+        <profile>
+            <id>only-eclipse</id>
+            <activation>
+                <property>
+                    <name>m2e.version</name>
+                </property>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.eclipse.m2e</groupId>
+                            <artifactId>lifecycle-mapping</artifactId>
+                            <version>1.0.0</version>
+                            <configuration>
+                                <lifecycleMappingMetadata>
+                                    <pluginExecutions>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.maven.plugins
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-antrun-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [1.3,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>run</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                 <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                        <pluginExecutionFilter>
+                                            <groupId>
+                                                org.apache.maven.plugins
+                                            </groupId>
+                                            <artifactId>
+                                                maven-dependency-plugin
+                                            </artifactId>
+                                            <versionRange>
+                                                [2.2,)
+                                            </versionRange>
+                                            <goals>
+                                                <goal>copy-dependencies</goal>
+                                                <goal>unpack</goal>
+                                            </goals>
+                                        </pluginExecutionFilter>
+                                        <action>
+                                             <ignore />
+                                        </action>
+                                    </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.codehaus.groovy.maven
+                                                </groupId>
+                                                <artifactId>
+                                                    gmaven-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [1.0,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>compile</goal>
+                                                    <goal>testCompile</goal>
+                                                    <goal>execute</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.codehaus.mojo
+                                                </groupId>
+                                                <artifactId>
+                                                    build-helper-maven-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [1.5,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        reserve-network-port
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.sling
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-launchpad-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [2.0.10,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>prepare-package</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.sling
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-jcrocm-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [2.0.4-incubator,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>ocm</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.sling
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-sling-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [2.1.0,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>generate-adapter-metadata</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.maven.plugins
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-dependency-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [2.2,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        unpack-dependencies
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.maven.plugins
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-jar-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [2.3.1,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        jar
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.sling
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-jspc-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [2.0.4,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        jspc
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    net.alchim31.maven
+                                                </groupId>
+                                                <artifactId>
+                                                    yuicompressor-maven-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [1.3.0,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        compress
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.scala-tools
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-scala-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [2.15.2,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        compile
+                                                    </goal>
+                                                    <goal>
+                                                        testCompile
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.maven.plugins
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-enforcer-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [1.3.1,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        enforce
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.maven.plugins
+                                                </groupId>
+                                                <artifactId>
+                                                    maven-remote-resources-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [1.5,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>
+                                                        process
+                                                    </goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>
+                                                    org.apache.avro
+                                                </groupId>
+                                                <artifactId>
+                                                    avro-maven-plugin
+                                                </artifactId>
+                                                <versionRange>
+                                                    [1.7.7,)
+                                                </versionRange>
+                                                <goals>
+                                                    <goal>schema</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore />
+                                            </action>
+                                        </pluginExecution>
+                                    </pluginExecutions>
+                                </lifecycleMappingMetadata>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
             </build>
         </profile>
     </profiles>
@@ -958,13 +1110,21 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
             <dependency>
                 <groupId>org.apache.felix</groupId>
                 <artifactId>org.apache.felix.scr.annotations</artifactId>
-                <version>1.9.6</version>
+                <version>1.9.12</version>
                 <scope>provided</scope>
             </dependency>
+            <!-- this version must match the version being used by the maven-bundle-plugin -->
             <dependency>
-                <groupId>biz.aQute</groupId>
-                <artifactId>bndlib</artifactId>
-                <version>1.50.0</version>
+                <groupId>biz.aQute.bnd</groupId>
+                <artifactId>biz.aQute.bndlib</artifactId>
+                <version>3.0.0</version>
+                <scope>provided</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>com.google.code.findbugs</groupId>
+                <artifactId>jsr305</artifactId>
+                <version>3.0.0</version>
                 <scope>provided</scope>
             </dependency>
 
@@ -972,7 +1132,7 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
             <dependency>
                 <groupId>junit</groupId>
                 <artifactId>junit</artifactId>
-                <version>4.11</version>
+                <version>4.12</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
@@ -999,8 +1159,8 @@ on 64bit platforms: MAVEN_OPTS="-Xmx512M -XX:MaxPermSize=512M", see SLING-1782
             <artifactId>org.apache.felix.scr.annotations</artifactId>
         </dependency>
         <dependency>
-            <groupId>biz.aQute</groupId>
-            <artifactId>bndlib</artifactId>
+            <groupId>biz.aQute.bnd</groupId>
+            <artifactId>biz.aQute.bndlib</artifactId>
         </dependency>
     </dependencies>
 

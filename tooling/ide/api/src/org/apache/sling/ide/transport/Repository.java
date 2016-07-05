@@ -74,16 +74,37 @@ public interface Repository {
 	public static String JCR_ROOT_VERSION= "jcr:rootVersion";
 	public static String JCR_VERSION_LABELS= "jcr:versionLabels";
 	public static String JCR_CHILD_VERSION_HISTORY= "jcr:childVersionHistory";
- 	
-	//TODO change with properties
-    // FIXME this is not thread-safe and with multiple sling servers will fail intermitently
-	public void setRepositoryInfo(RepositoryInfo repositoryInfo);
 
+    public enum CommandExecutionFlag {
+
+        /**
+         * Signal the command to only create the nodes when they are missing
+         * 
+         * <p>
+         * If nodes exist, they will not be touched
+         */
+        CREATE_ONLY_WHEN_MISSING;
+    }
+ 	
     RepositoryInfo getRepositoryInfo();
 
-    Command<Void> newAddOrUpdateNodeCommand(FileInfo fileInfo, ResourceProxy resourceProxy);
+    Command<Void> newAddOrUpdateNodeCommand(CommandContext context, FileInfo fileInfo, ResourceProxy resourceProxy,
+            CommandExecutionFlag... flags);
+
+    /**
+     * Reorder the child nodes under the specified resource
+     * 
+     * <p>
+     * Only the first-level child nodes are typically ordered, but if child nodes are completely covered they will be
+     * ordered recursively.
+     * </p>
+     * 
+     * @param resourceProxy
+     * @return
+     */
+    Command<Void> newReorderChildNodesCommand(ResourceProxy resourceProxy);
 	
-	Command<Void> newDeleteNodeCommand(ResourceProxy resourceProxy);
+    Command<Void> newDeleteNodeCommand(String path);
  
     /**
      * Retrieves information about the resource located at <tt>path</tt> and its direct descendants
@@ -102,4 +123,13 @@ public interface Repository {
     Command<ResourceProxy> newGetNodeContentCommand(String path);
 
 	Command<byte[]> newGetNodeCommand(String path);
+	
+	/**
+	 * Returns the node type registry - when the underlying server is started -
+	 * or null when the server is not started at the moment.
+	 * @return the node type registry - when the underlying server is started -
+     * or null when the server is not started at the moment
+	 */
+	NodeTypeRegistry getNodeTypeRegistry();
+
 }

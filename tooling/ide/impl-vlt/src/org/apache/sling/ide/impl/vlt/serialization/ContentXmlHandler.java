@@ -17,10 +17,12 @@
 package org.apache.sling.ide.impl.vlt.serialization;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Deque;
 import java.util.EnumSet;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.UUID;
 
 import org.apache.jackrabbit.util.ISO8601;
@@ -35,7 +37,7 @@ public class ContentXmlHandler extends DefaultHandler {
 
     private static final String JCR_ROOT = "jcr:root";
     private final ResourceProxy root;
-    private final Deque<ResourceProxy> queue = new LinkedList<ResourceProxy>();
+    private final Deque<ResourceProxy> queue = new LinkedList<>();
 
     public ContentXmlHandler(String rootResourcePath) {
         root = new ResourceProxy(rootResourcePath);
@@ -66,6 +68,11 @@ public class ContentXmlHandler extends DefaultHandler {
             String value = attributes.getValue(i);
             Object typedValue = TypeHint.parsePossiblyTypedValue(value);
             
+            // unsupported
+            if (typedValue == null) {
+                continue;
+            }
+
             current.addProperty(attributeQName, typedValue);
         }
 
@@ -84,10 +91,16 @@ public class ContentXmlHandler extends DefaultHandler {
     
     // TODO - validate that this is comprehensive
     static enum TypeHint {
+        BINARY("Binary") {
+            @Override
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                return null;
+            }
+        },
         BOOLEAN("Boolean") {
             @Override
-            Object parseValues(String[] values) {
-                if (values.length == 1) {
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                if (values.length == 1 && !explicitMultiValue) {
                     return Boolean.valueOf(values[0]);
                 }
 
@@ -101,9 +114,9 @@ public class ContentXmlHandler extends DefaultHandler {
         },
         DATE("Date") {
             @Override
-            Object parseValues(String[] values) {
+            Object parseValues(String[] values, boolean explicitMultiValue) {
 
-                if (values.length == 1) {
+                if (values.length == 1 && !explicitMultiValue) {
                     return ISO8601.parse(values[0]);
                 }
 
@@ -116,8 +129,8 @@ public class ContentXmlHandler extends DefaultHandler {
         },
         DOUBLE("Double") {
             @Override
-            Object parseValues(String[] values) {
-                if (values.length == 1) {
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                if (values.length == 1 && !explicitMultiValue) {
                     return Double.parseDouble(values[0]);
                 }
 
@@ -130,8 +143,8 @@ public class ContentXmlHandler extends DefaultHandler {
         },
         LONG("Long") {
             @Override
-            Object parseValues(String[] values) {
-                if ( values.length == 1 ) {
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                if (values.length == 1 && !explicitMultiValue) {
                     return Long.valueOf(values[0]);
                 }
                 
@@ -144,8 +157,8 @@ public class ContentXmlHandler extends DefaultHandler {
         },
         DECIMAL("Decimal") {
             @Override
-            Object parseValues(String[] values) {
-                if ( values.length == 1) {
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                if (values.length == 1 && !explicitMultiValue) {
                     return new BigDecimal(values[0]);
                 }
                 
@@ -157,29 +170,23 @@ public class ContentXmlHandler extends DefaultHandler {
             }
         },
         NAME("Name") {
-
             @Override
-            Object parseValues(String[] values) {
-                if (values.length == 1) {
-                    return values[0];
-                }
-
+            Object parseValues(String[] values, boolean explicitMultiValue) {
                 return values;
             }
         },
         PATH("Path") {
 
             @Override
-            Object parseValues(String[] values) {
-                return NAME.parseValues(values);
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                return NAME.parseValues(values, explicitMultiValue);
             }
 
         },
         REFERENCE("Reference") {
-
             @Override
-            Object parseValues(String[] values) {
-                if (values.length == 1) {
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                if (values.length == 1 && !explicitMultiValue) {
                     return UUID.fromString(values[0]);
                 }
 
@@ -194,16 +201,16 @@ public class ContentXmlHandler extends DefaultHandler {
 
         },
         WEAKREFERENCE("WeakReference") {
-
             @Override
-            Object parseValues(String[] values) {
-                return REFERENCE.parseValues(values);
+            Object parseValues(String[] values, boolean explicitMultiValue) {
+                return REFERENCE.parseValues(values, explicitMultiValue);
             }
 
         };
 
         static Object parsePossiblyTypedValue(String value) {
 
+            boolean explicitMultiValue = false;
             String rawValue;
             int hintEnd = -1;
             
@@ -220,20 +227,24 @@ public class ContentXmlHandler extends DefaultHandler {
             
             String[] values;
 
-            if (rawValue.charAt(0) == '[') {
+            // SLING-3609
+            if (rawValue.length()>0 && rawValue.charAt(0) == '[') {
 
                 if (rawValue.charAt(rawValue.length() - 1) != ']') {
                     throw new IllegalArgumentException("Invalid multi-valued property definition : '" + rawValue + "'");
                 }
 
                 String rawValues = rawValue.substring(1, rawValue.length() - 1);
-                values = rawValues.split(",");
+                values = splitValues(rawValues);
+                explicitMultiValue = true;
             } else {
                 values = new String[] { rawValue };
             }
 
+            // no hint -> string type
             if (hintEnd == -1) {
-                if (values.length == 1) {
+                unescape(values);
+                if (values.length == 1 && !explicitMultiValue) {
                     return values[0];
                 }
                 return values;
@@ -243,11 +254,52 @@ public class ContentXmlHandler extends DefaultHandler {
 
             for (TypeHint hint : EnumSet.allOf(TypeHint.class)) {
                 if (hint.rawHint.equals(rawHint)) {
-                    return hint.parseValues(values);
+                    return hint.parseValues(values, explicitMultiValue);
                 }
             }
 
             throw new IllegalArgumentException("Unknown typeHint value '" + rawHint + "'");
+        }
+
+        private static String[] splitValues(String rawValues) {
+            
+            if ( rawValues.isEmpty() ) {
+                return new String[0];
+            }
+            
+            List<String> values = new ArrayList<>();
+            String[] firstPass = rawValues.split(",");
+            for ( int i = 0 ; i < firstPass.length; i++) {
+                
+                String val = firstPass[i];
+                
+                boolean trailingSlash = val.endsWith("\\");
+                boolean moreEntries = i < firstPass.length;
+                
+                // special case where the comma is escaped, so this means that
+                // two values should be joined
+                if ( trailingSlash && moreEntries ) {
+                    // re-establish the value, e.g. first\,second becomes a single first,second entry
+                    values.add(val.substring(0, val.length() - 1) + "," + firstPass[i+1]);
+                    // manually advance the iteration couter since we consumed the next entry
+                    i++;
+                    continue;
+                }
+              
+                values.add(val);
+            }
+            
+            return values.toArray(new String[values.size()]);
+            
+        }
+
+        private static void unescape(String[] values) {
+
+            for (int i = 0; i < values.length; i++) {
+                if (values[i].length() > 0 && values[i].charAt(0) == '\\') {
+                    values[i] = values[i].substring(1);
+                }
+            }
         }
 
         private final String rawHint;
@@ -257,7 +309,7 @@ public class ContentXmlHandler extends DefaultHandler {
             this.rawHint = rawHint;
         }
 
-        abstract Object parseValues(String[] values);
+        abstract Object parseValues(String[] values, boolean explicitMultiValue);
 
     }
 }

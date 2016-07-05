@@ -16,6 +16,7 @@
  */
 package org.apache.sling.ide.eclipse.core.internal;
 
+import org.apache.sling.ide.eclipse.core.DefaultSlingLaunchpadConfiguration;
 import org.apache.sling.ide.eclipse.core.ISlingLaunchpadConfiguration;
 import org.apache.sling.ide.eclipse.core.ISlingLaunchpadServer;
 import org.eclipse.core.runtime.CoreException;
@@ -28,8 +29,6 @@ import org.eclipse.wst.server.core.model.ServerDelegate;
 import org.osgi.framework.Version;
 
 public class SlingLaunchpadServer extends ServerDelegate implements ISlingLaunchpadServer {
-
-    private static final String PROP_AUTO_PUBLISH_SETTING = "auto-publish-setting";
 
     private static final String MODULE_TYPE_SLING_CONTENT = "sling.content";
 
@@ -56,8 +55,6 @@ public class SlingLaunchpadServer extends ServerDelegate implements ISlingLaunch
     @Override
     public IStatus canModifyModules(IModule[] toAdd, IModule[] toRemove) {
 
-        System.out.println("SlingLaunchpadServer.canModifyModules()");
-
         if (toAdd == null) {
             return Status.OK_STATUS;
         }
@@ -66,8 +63,8 @@ public class SlingLaunchpadServer extends ServerDelegate implements ISlingLaunch
 
             if (!MODULE_TYPE_SLING_CONTENT.equals(module.getModuleType().getId()) &&
             		!MODULE_TYPE_SLING_BUNDLE.equals(module.getModuleType().getId())) {
-                return new Status(IStatus.ERROR, "org.apache.sling.slingclipse", 0,
-                        "Will only handle modules of type 'sling.content' or 'sling.bundle'", null);
+                return new Status(IStatus.ERROR, Activator.PLUGIN_ID,
+                        "Will only handle modules of type 'sling.content' or 'sling.bundle'");
             }
         }
 
@@ -110,48 +107,22 @@ public class SlingLaunchpadServer extends ServerDelegate implements ISlingLaunch
     @Override
     public void modifyModules(IModule[] toAdd, IModule[] toRemove, IProgressMonitor arg2) throws CoreException {
 
-        System.out.println("SlingLaunchpadServer.modifyModules()");
-
         IStatus status = canModifyModules(toAdd, toRemove);
         if (!status.isOK()) {
             throw new CoreException(status);
         }
 
-        for (IModule module : toAdd) {
-            System.out.println("Adding module " + module);
-        }
-
-        for (IModule module : toRemove) {
-            System.out.println("Removing module " + module);
-        }
+        // TODO - what else do we do?
     }
 
     @Override
     public void setDefaults(IProgressMonitor monitor) {
 
-        setAttribute(PROP_PORT, 8080);
-        setAttribute(PROP_DEBUG_PORT, 30303);
+        setAttribute(PROP_PORT, DefaultSlingLaunchpadConfiguration.INSTANCE.getPort());
+        setAttribute(PROP_DEBUG_PORT, DefaultSlingLaunchpadConfiguration.INSTANCE.getDebugPort());
         setAttribute(PROP_CONTEXT_PATH, "/");
-        setAttribute(PROP_USERNAME, "admin");
-        setAttribute(PROP_PASSWORD, "admin");
-    }
-
-    @Override
-    public int getPublishState() {
-        return getAttribute(PROP_AUTO_PUBLISH_SETTING, PUBLISH_STATE_NEVER);
-    }
-    
-    @Override
-    public void setPublishState(int publishState, IProgressMonitor monitor) {
-        System.out.println("[" + Thread.currentThread().getName() + "] Set " + PROP_AUTO_PUBLISH_SETTING + " to "
-                + publishState);
-        IServerWorkingCopy wc = getServer().createWorkingCopy();
-		wc.setAttribute(PROP_AUTO_PUBLISH_SETTING, publishState);
-		try {
-			wc.save(false, monitor);
-		} catch (CoreException e) {
-			throw new RuntimeException(e);
-		}
+        setAttribute(PROP_USERNAME, DefaultSlingLaunchpadConfiguration.INSTANCE.getUsername());
+        setAttribute(PROP_PASSWORD, DefaultSlingLaunchpadConfiguration.INSTANCE.getPassword());
     }
 
     @Override

@@ -23,20 +23,26 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
-import javax.servlet.ServletRequest;
+import javax.annotation.Nonnull;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.Service;
-import org.apache.sling.api.scripting.SlingBindings;
-import org.apache.sling.api.scripting.SlingScriptHelper;
 import org.apache.sling.models.annotations.Filter;
+import org.apache.sling.models.annotations.injectorspecific.InjectionStrategy;
+import org.apache.sling.models.annotations.injectorspecific.OSGiService;
+import org.apache.sling.models.spi.AcceptsNullName;
 import org.apache.sling.models.spi.DisposalCallback;
 import org.apache.sling.models.spi.DisposalCallbackRegistry;
 import org.apache.sling.models.spi.Injector;
+import org.apache.sling.models.spi.injectorspecific.AbstractInjectAnnotationProcessor2;
+import org.apache.sling.models.spi.injectorspecific.InjectAnnotationProcessor2;
+import org.apache.sling.models.spi.injectorspecific.StaticInjectAnnotationProcessorFactory;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
 import org.osgi.framework.InvalidSyntaxException;
@@ -48,14 +54,14 @@ import org.slf4j.LoggerFactory;
 @Component
 @Service
 @Property(name = Constants.SERVICE_RANKING, intValue = 5000)
-public class OSGiServiceInjector implements Injector {
+public class OSGiServiceInjector implements Injector, StaticInjectAnnotationProcessorFactory, AcceptsNullName {
 
     private static final Logger log = LoggerFactory.getLogger(OSGiServiceInjector.class);
 
     private BundleContext bundleContext;
 
     @Override
-    public String getName() {
+    public @Nonnull String getName() {
         return "osgi-services";
     }
 
@@ -64,81 +70,68 @@ public class OSGiServiceInjector implements Injector {
         this.bundleContext = ctx.getBundleContext();
     }
 
-    public Object getValue(Object adaptable, String name, Type type, AnnotatedElement element, DisposalCallbackRegistry callbackRegistry) {
-        Filter filter = element.getAnnotation(Filter.class);
+    public Object getValue(@Nonnull Object adaptable, String name, @Nonnull Type type, @Nonnull AnnotatedElement element,
+            @Nonnull DisposalCallbackRegistry callbackRegistry) {
+        OSGiService annotation = element.getAnnotation(OSGiService.class);
         String filterString = null;
-        if (filter != null) {
-            filterString = filter.value();
+        if (annotation != null) {
+            if (StringUtils.isNotBlank(annotation.filter())) {
+                filterString = annotation.filter();
+            }
+        } else {
+            Filter filter = element.getAnnotation(Filter.class);
+            if (filter != null) {
+                filterString = filter.value();
+            }
         }
-
         return getValue(adaptable, type, filterString, callbackRegistry);
     }
 
-    private <T> Object getService(Object adaptable, Class<T> type, String filter, DisposalCallbackRegistry callbackRegistry) {
-        SlingScriptHelper helper = getScriptHelper(adaptable);
-
-        if (helper != null) {
-            T[] services = helper.getServices(type, filter);
-            if (services == null || services.length == 0) {
+    private <T> Object getService(Object adaptable, Class<T> type, String filter,
+            DisposalCallbackRegistry callbackRegistry) {
+        // cannot use SlingScriptHelper since it does not support ordering by service ranking due to https://issues.apache.org/jira/browse/SLING-5665
+        try {
+            ServiceReference[] refs = bundleContext.getServiceReferences(type.getName(), filter);
+            if (refs == null || refs.length == 0) {
                 return null;
             } else {
-                return services[0];
+                // sort by service ranking (lowest first) (see ServiceReference.compareTo)
+                List<ServiceReference> references = Arrays.asList(refs);
+                Collections.sort(references);
+                callbackRegistry.addDisposalCallback(new Callback(refs, bundleContext));
+                return bundleContext.getService(references.get(references.size() - 1));
             }
-        } else {
-            try {
-                ServiceReference[] refs = bundleContext.getServiceReferences(type.getName(), filter);
-                if (refs == null || refs.length == 0) {
-                    return null;
-                } else {
-                    callbackRegistry.addDisposalCallback(new Callback(refs, bundleContext));
-                    return bundleContext.getService(refs[0]);
-                }
-            } catch (InvalidSyntaxException e) {
-                log.error("invalid filter expression", e);
-                return null;
-            }
+        } catch (InvalidSyntaxException e) {
+            log.error("invalid filter expression", e);
+            return null;
         }
     }
 
-    private <T> Object[] getServices(Object adaptable, Class<T> type, String filter, DisposalCallbackRegistry callbackRegistry) {
-        SlingScriptHelper helper = getScriptHelper(adaptable);
-
-        if (helper != null) {
-            T[] services = helper.getServices(type, filter);
-            return services;
-        } else {
-            try {
-                ServiceReference[] refs = bundleContext.getServiceReferences(type.getName(), filter);
-                if (refs == null || refs.length == 0) {
-                    return null;
-                } else {
-                    callbackRegistry.addDisposalCallback(new Callback(refs, bundleContext));
-                    List<Object> services = new ArrayList<Object>();
-                    for (ServiceReference ref : refs) {
-                        Object service = bundleContext.getService(ref);
-                        if (service != null) {
-                            services.add(service);
-                        }
+    private <T> Object[] getServices(Object adaptable, Class<T> type, String filter,
+            DisposalCallbackRegistry callbackRegistry) {
+        // cannot use SlingScriptHelper since it does not support ordering by service ranking due to https://issues.apache.org/jira/browse/SLING-5665
+        try {
+            ServiceReference[] refs = bundleContext.getServiceReferences(type.getName(), filter);
+            if (refs == null || refs.length == 0) {
+                return null;
+            } else {
+                // sort by service ranking (lowest first) (see ServiceReference.compareTo)
+                List<ServiceReference> references = Arrays.asList(refs);
+                Collections.sort(references);
+                // make highest service ranking being returned first
+                Collections.reverse(references);
+                callbackRegistry.addDisposalCallback(new Callback(refs, bundleContext));
+                List<Object> services = new ArrayList<Object>();
+                for (ServiceReference ref : references) {
+                    Object service = bundleContext.getService(ref);
+                    if (service != null) {
+                        services.add(service);
                     }
-                    return services.toArray();
                 }
-            } catch (InvalidSyntaxException e) {
-                log.error("invalid filter expression", e);
-                return null;
+                return services.toArray();
             }
-        }
-    }
-
-    private SlingScriptHelper getScriptHelper(Object adaptable) {
-        if (adaptable instanceof ServletRequest) {
-            ServletRequest request = (ServletRequest) adaptable;
-            SlingBindings bindings = (SlingBindings) request.getAttribute(SlingBindings.class.getName());
-            if (bindings != null) {
-                return bindings.getSling();
-            } else {
-                return null;
-            }
-        } else {
+        } catch (InvalidSyntaxException e) {
+            log.error("invalid filter expression", e);
             return null;
         }
     }
@@ -147,7 +140,8 @@ public class OSGiServiceInjector implements Injector {
         if (type instanceof Class) {
             Class<?> injectedClass = (Class<?>) type;
             if (injectedClass.isArray()) {
-                Object[] services = getServices(adaptable, injectedClass.getComponentType(), filterString, callbackRegistry);
+                Object[] services = getServices(adaptable, injectedClass.getComponentType(), filterString,
+                        callbackRegistry);
                 if (services == null) {
                     return null;
                 }
@@ -180,16 +174,16 @@ public class OSGiServiceInjector implements Injector {
             return null;
         }
     }
-    
+
     private static class Callback implements DisposalCallback {
         private final ServiceReference[] refs;
         private final BundleContext context;
-        
+
         public Callback(ServiceReference[] refs, BundleContext context) {
             this.refs = refs;
             this.context = context;
         }
-        
+
         @Override
         public void onDisposed() {
             if (refs != null) {
@@ -199,5 +193,36 @@ public class OSGiServiceInjector implements Injector {
             }
         }
     }
+
+    @Override
+    public InjectAnnotationProcessor2 createAnnotationProcessor(AnnotatedElement element) {
+        // check if the element has the expected annotation
+        OSGiService annotation = element.getAnnotation(OSGiService.class);
+        if (annotation != null) {
+            return new OSGiServiceAnnotationProcessor(annotation);
+        }
+        return null;
+    }
+
+    private static class OSGiServiceAnnotationProcessor extends AbstractInjectAnnotationProcessor2 {
+
+        private final OSGiService annotation;
+
+        public OSGiServiceAnnotationProcessor(OSGiService annotation) {
+            this.annotation = annotation;
+        }
+
+        @Override
+        public InjectionStrategy getInjectionStrategy() {
+            return annotation.injectionStrategy();
+        }
+        
+        @Override
+        @SuppressWarnings("deprecation")
+        public Boolean isOptional() {
+            return annotation.optional();
+        }
+    }
+
 
 }

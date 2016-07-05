@@ -25,6 +25,7 @@ import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceMetadata;
 import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.api.resource.ValueMap;
+import org.apache.sling.api.wrappers.DeepReadValueMapDecorator;
 
 /**
  * {@inheritDoc}
@@ -40,11 +41,17 @@ public class MergedResource extends AbstractResource {
     /** Resource type. */
     private final String resourceType;
 
+    /** Resource super type. */
+    private final String resourceSuperType;
+
     /** Resource meta data. */
     private final ResourceMetadata metadata = new ResourceMetadata();
 
     /** Cache value map. */
     private final ValueMap properties;
+
+    /** Resources which are merged together. */
+    private final List<Resource> mappedResources;
 
     /**
      * Constructor
@@ -61,8 +68,27 @@ public class MergedResource extends AbstractResource {
                    final List<ValueMap> valueMaps) {
         this.resolver = resolver;
         this.path = (relativePath.length() == 0 ? mergeRootPath : mergeRootPath + "/" + relativePath);
-        this.properties = new MergedValueMap(valueMaps);
-        this.resourceType = this.properties.get(ResourceResolver.PROPERTY_RESOURCE_TYPE, (relativePath.length() == 0 ? "/" : relativePath));
+        this.mappedResources = mappedResources;
+        this.properties = new DeepReadValueMapDecorator(this, new MergedValueMap(valueMaps));
+        // get resource type
+        final String slingPropRT = this.properties.get(ResourceResolver.PROPERTY_RESOURCE_TYPE, String.class);
+        String rt = slingPropRT;
+        if (rt == null) {
+            rt = relativePath.length() == 0 ? "/" : relativePath;
+        }
+        // use the resource type of the last resource in the set that provides one
+        for(final Resource rsrc : mappedResources) {
+            final String value = rsrc.getResourceType();
+            if ( value != null ) {
+                rt = value;
+            }
+        }
+        this.resourceType = rt;
+        if ( !rt.equals(slingPropRT) ) {
+            this.resourceSuperType = slingPropRT;
+        } else {
+            this.resourceSuperType = null;
+        }
         metadata.put(MergedResourceConstants.METADATA_FLAG, true);
         final String[] resourcePaths = new String[mappedResources.size()];
         int i = 0;
@@ -91,8 +117,7 @@ public class MergedResource extends AbstractResource {
      * {@inheritDoc}
      */
     public String getResourceSuperType() {
-        // So far, there's no concept of resource super type for a merged resource
-        return null;
+        return this.resourceSuperType;
     }
 
     /**
@@ -109,6 +134,9 @@ public class MergedResource extends AbstractResource {
         return resolver;
     }
 
+    public List<Resource> getMappedResources() {
+        return mappedResources;
+    }
 
     /**
      * {@inheritDoc}

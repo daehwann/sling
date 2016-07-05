@@ -46,6 +46,7 @@ import org.apache.sling.launchpad.base.shared.Notifiable;
 import org.apache.sling.launchpad.base.shared.SharedConstants;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleException;
+import org.osgi.framework.ServiceEvent;
 import org.osgi.framework.ServiceReference;
 
 /**
@@ -134,10 +135,10 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
     private boolean servletDestroyed = false;
 
     /**
-     * The <code>Felix</code> instance loaded on {@link #init()} and stopped
+     * The OSGI framework instance loaded on {@link #init()} and stopped
      * on {@link #destroy()}.
      */
-    private SlingBridge sling;
+    private Sling sling;
 
     /**
      * The map of delegatee servlets to which requests are delegated. This map
@@ -156,23 +157,28 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
 
     private String slingHome;
 
+    @Override
     public void setNotifiable(Notifiable notifiable) {
         this.notifiable = notifiable;
     }
 
+    @Override
     public void setCommandLine(Map<String, String> args) {
         this.properties = args;
     }
 
+    @Override
     public void setSlingHome(String slingHome) {
         this.slingHome = slingHome;
     }
 
+    @Override
     public boolean start() {
         // might want to log, why we don't start !
         return false;
     }
 
+    @Override
     public void stop() {
         destroy();
     }
@@ -185,10 +191,11 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
      *
      * @throws ServletException if the framework cannot be initialized.
      */
+    @Override
     public final void init() throws ServletException {
         // temporary holders control final setup and ensure proper
         // disposal in case of setup errors
-        SlingBridge tmpSling = null;
+        Sling tmpSling = null;
         Servlet tmpDelegatee = null;
 
         try {
@@ -201,7 +208,7 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
             Logger logger = new ServletContextLogger(getServletContext());
             LaunchpadContentProvider rp = new ServletContextResourceProvider(
                 getServletContext());
-            tmpSling = new SlingBridge(notifiable, logger, rp, props, getServletContext());
+            tmpSling = SlingBridge.getSlingBridge(notifiable, logger, rp, props, getServletContext());
 
             // set up the OSGi HttpService proxy servlet
             tmpDelegatee = new ProxyServlet();
@@ -267,6 +274,7 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
      *             servlet's normal operation occurred
      * @throws IOException if an input or output exception occurs
      */
+    @Override
     public final void service(ServletRequest req, ServletResponse res)
             throws ServletException, IOException {
 
@@ -283,6 +291,7 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
      * Destroys this servlet by shutting down the OSGi framework and hence the
      * delegatee servlet if one is set at all.
      */
+    @Override
     public final void destroy() {
 
         // set the destroyed flag to signal to the startSling method
@@ -337,9 +346,18 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
         // The following property must start with a comma!
         final String servletVersion = getServletContext().getMajorVersion() + "." +
                                       getServletContext().getMinorVersion();
+        String packages = ",javax.servlet;javax.servlet.http;javax.servlet.resources";
+        if ( getServletContext().getMajorVersion() >= 3 ) {
+            // servlet 3.x adds new packages and we should export as 2.6 and 3.x
+            packages = packages + "; version=2.6" + packages + ";javax.servlet.annotation;javax.servlet.descriptor";
+        }
         props.put(
-            Sling.PROP_SYSTEM_PACKAGES,
-            ",javax.servlet;javax.servlet.http;javax.servlet.resources; version=" + servletVersion);
+                 Sling.PROP_SYSTEM_PACKAGES,
+                 packages + "; version=" + servletVersion);
+        // extra capabilities
+        final String servletCaps = "osgi.contract;osgi.contract=JavaServlet;version:Version=\" " + servletVersion + "\";" +
+                        "uses:=\"javax.servlet,javax.servlet.http,javax.servlet.descriptor,javax.servlet.annotation\"";
+        props.put(Sling.PROP_EXTRA_CAPS, servletCaps);
 
         // prevent system properties from being considered
         props.put(Sling.SLING_IGNORE_SYSTEM_PROPERTIES, "true");
@@ -348,7 +366,6 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
             props.putAll(this.properties);
         } else {
             // copy context init parameters
-            @SuppressWarnings("unchecked")
             Enumeration<String> cpe = getServletContext().getInitParameterNames();
             while (cpe.hasMoreElements()) {
                 String name = cpe.nextElement();
@@ -356,7 +373,6 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
             }
 
             // copy servlet init parameters
-            @SuppressWarnings("unchecked")
             Enumeration<String> pe = getInitParameterNames();
             while (pe.hasMoreElements()) {
                 String name = pe.nextElement();
@@ -429,7 +445,7 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
 
         @Override
         protected void doLog(
-                Bundle bundle, ServiceReference sr, int level,
+                Bundle bundle, @SuppressWarnings("rawtypes") ServiceReference sr, int level,
                 String msg, Throwable throwable) {
 
             // unwind throwable if it is a BundleException
@@ -520,6 +536,7 @@ public class SlingServletDelegate extends GenericServlet implements Launcher {
             return resources.iterator(); // unchecked
         }
 
+        @Override
         public URL getResource(String path) {
             // nothing for empty or null path
             if (path == null || path.length() == 0) {

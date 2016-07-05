@@ -16,7 +16,6 @@
  */
 package org.apache.sling.ide.eclipse.ui.internal;
 
-import org.apache.sling.ide.eclipse.core.internal.BundleStateHelper;
 import org.eclipse.jface.viewers.BaseLabelProvider;
 import org.eclipse.jface.viewers.IDecoration;
 import org.eclipse.jface.viewers.ILightweightLabelDecorator;
@@ -30,11 +29,11 @@ public class ServerModuleDecorator extends BaseLabelProvider implements ILightwe
 			return;
 		}
 		IServerModule serverModule = (IServerModule)element;
-		Object state = BundleStateHelper.getBundleState(serverModule.getServer(), serverModule.getModule()[0].getProject());
-		if (state==null) {
-			return;
-		}
-		decoration.addSuffix(String.valueOf(state));
+//		Object state = BundleStateHelper.getBundleState(serverModule.getServer(), serverModule.getModule()[0].getProject());
+//		if (state==null) {
+//			return;
+//		}
+		//decoration.addSuffix(String.valueOf(state));
 	}
 
 }

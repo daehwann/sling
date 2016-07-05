@@ -18,10 +18,12 @@ package org.apache.sling.ide.osgi.impl;
 
 import java.io.InputStream;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.sling.ide.osgi.OsgiClient;
 import org.apache.sling.ide.osgi.OsgiClientException;
+import org.apache.sling.ide.osgi.SourceReference;
 import org.apache.sling.ide.transport.CommandExecutionProperties;
 import org.osgi.framework.Version;
 import org.osgi.service.event.Event;
@@ -54,21 +56,31 @@ public class TracingOsgiClient implements OsgiClient {
     @Override
     public void installLocalBundle(String explodedBundleLocation) throws OsgiClientException {
 
-        logInstallLocalBundle(explodedBundleLocation);
+        logInstallLocalBundle(null, explodedBundleLocation);
     }
 
-    private void logInstallLocalBundle(String explodedBundleLocation) throws OsgiClientException, Error {
+    private void logInstallLocalBundle(InputStream input, String explodedBundleLocation) throws OsgiClientException {
 
-        Map<String, Object> props = new HashMap<String, Object>();
+        Map<String, Object> props = new HashMap<>();
         long start = System.currentTimeMillis();
-        props.put(CommandExecutionProperties.ACTION_TYPE, "InstallLocalBundle");
+        if (input != null) {
+            props.put(CommandExecutionProperties.ACTION_TYPE, "InstallJarredBundle");
+        } else {
+            props.put(CommandExecutionProperties.ACTION_TYPE, "InstallLocalBundle");
+        }
         props.put(CommandExecutionProperties.ACTION_TARGET, explodedBundleLocation);
         props.put(CommandExecutionProperties.TIMESTAMP_START, start);
         try {
-            osgiClient.installLocalBundle(explodedBundleLocation);
+            if (input != null) {
+                osgiClient.installLocalBundle(input, explodedBundleLocation);
+            } else {
+                osgiClient.installLocalBundle(explodedBundleLocation);
+            }
             props.put(CommandExecutionProperties.RESULT_TEXT, "OK");
+            props.put(CommandExecutionProperties.RESULT_STATUS, Boolean.TRUE);
         } catch (Throwable t) {
             props.put(CommandExecutionProperties.RESULT_TEXT, "FAILED");
+            props.put(CommandExecutionProperties.RESULT_STATUS, Boolean.FALSE);
             props.put(CommandExecutionProperties.RESULT_THROWABLE, t);
             if (t instanceof OsgiClientException) {
                 throw (OsgiClientException) t;
@@ -90,7 +102,12 @@ public class TracingOsgiClient implements OsgiClient {
     @Override
     public void installLocalBundle(InputStream jarredBundle, String sourceLocation) throws OsgiClientException {
 
-        logInstallLocalBundle(sourceLocation);
+        logInstallLocalBundle(jarredBundle, sourceLocation);
+    }
+    
+    @Override
+    public List<SourceReference> findSourceReferences() throws OsgiClientException {
+        return osgiClient.findSourceReferences();
     }
 
 }

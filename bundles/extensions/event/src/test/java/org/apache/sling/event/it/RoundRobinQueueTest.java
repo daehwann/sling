@@ -24,14 +24,18 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.Dictionary;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Hashtable;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.sling.event.impl.Barrier;
 import org.apache.sling.event.impl.jobs.config.ConfigurationConstants;
 import org.apache.sling.event.jobs.Job;
 import org.apache.sling.event.jobs.JobManager;
-import org.apache.sling.event.jobs.JobUtil;
+import org.apache.sling.event.jobs.NotificationConstants;
 import org.apache.sling.event.jobs.Queue;
 import org.apache.sling.event.jobs.QueueConfiguration;
 import org.apache.sling.event.jobs.consumer.JobConsumer;
@@ -40,14 +44,10 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.ops4j.pax.exam.junit.PaxExam;
-import org.ops4j.pax.exam.spi.reactors.ExamReactorStrategy;
-import org.ops4j.pax.exam.spi.reactors.PerMethod;
-import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.event.Event;
 import org.osgi.service.event.EventHandler;
 
 @RunWith(PaxExam.class)
-@ExamReactorStrategy(PerMethod.class)
 public class RoundRobinQueueTest extends AbstractJobHandlingTest {
 
     private static final String QUEUE_NAME = "roundrobintest";
@@ -55,32 +55,28 @@ public class RoundRobinQueueTest extends AbstractJobHandlingTest {
     private static int MAX_PAR = 5;
     private static int NUM_JOBS = 300;
 
-    private String queueConfPid;
-
     @Override
     @Before
     public void setup() throws IOException {
         super.setup();
 
-        // create ordered test queue
-        final org.osgi.service.cm.Configuration orderedConfig = this.configAdmin.createFactoryConfiguration("org.apache.sling.event.jobs.QueueConfiguration", null);
-        final Dictionary<String, Object> orderedProps = new Hashtable<String, Object>();
-        orderedProps.put(ConfigurationConstants.PROP_NAME, QUEUE_NAME);
-        orderedProps.put(ConfigurationConstants.PROP_TYPE, QueueConfiguration.Type.TOPIC_ROUND_ROBIN.name());
-        orderedProps.put(ConfigurationConstants.PROP_TOPICS, TOPIC + "/*");
-        orderedProps.put(ConfigurationConstants.PROP_RETRIES, 2);
-        orderedProps.put(ConfigurationConstants.PROP_RETRY_DELAY, 2000L);
-        orderedProps.put(ConfigurationConstants.PROP_MAX_PARALLEL, MAX_PAR);
-        orderedConfig.update(orderedProps);
-
-        queueConfPid = orderedConfig.getPid();
+        // create round robin test queue
+        final org.osgi.service.cm.Configuration rrConfig = this.configAdmin.createFactoryConfiguration("org.apache.sling.event.jobs.QueueConfiguration", null);
+        final Dictionary<String, Object> rrProps = new Hashtable<String, Object>();
+        rrProps.put(ConfigurationConstants.PROP_NAME, QUEUE_NAME);
+        rrProps.put(ConfigurationConstants.PROP_TYPE, QueueConfiguration.Type.TOPIC_ROUND_ROBIN.name());
+        rrProps.put(ConfigurationConstants.PROP_TOPICS, TOPIC + "/*");
+        rrProps.put(ConfigurationConstants.PROP_RETRIES, 2);
+        rrProps.put(ConfigurationConstants.PROP_RETRY_DELAY, 2000L);
+        rrProps.put(ConfigurationConstants.PROP_MAX_PARALLEL, MAX_PAR);
+        rrConfig.update(rrProps);
 
         this.sleep(1000L);
     }
 
+    @Override
     @After
-    public void cleanUp() throws IOException {
-        this.removeConfiguration(this.queueConfPid);
+    public void cleanup() {
         super.cleanup();
     }
 
@@ -90,7 +86,7 @@ public class RoundRobinQueueTest extends AbstractJobHandlingTest {
 
         final Barrier cb = new Barrier(2);
 
-        final ServiceRegistration jc1Reg = this.registerJobConsumer(TOPIC + "/start",
+        this.registerJobConsumer(TOPIC + "/start",
                 new JobConsumer() {
 
                     @Override
@@ -103,21 +99,27 @@ public class RoundRobinQueueTest extends AbstractJobHandlingTest {
         // register new consumer and event handle
         final AtomicInteger count = new AtomicInteger(0);
         final AtomicInteger parallelCount = new AtomicInteger(0);
-        final ServiceRegistration jcReg = this.registerJobConsumer(TOPIC + "/*",
+        final Set<Integer> maxParticipants = new HashSet<Integer>();
+
+        this.registerJobConsumer(TOPIC + "/*",
                 new JobConsumer() {
 
                     @Override
                     public JobResult process(final Job job) {
-                        if ( parallelCount.incrementAndGet() > MAX_PAR ) {
+                        final int max = parallelCount.incrementAndGet();
+                        if ( max > MAX_PAR ) {
                             parallelCount.decrementAndGet();
                             return JobResult.FAILED;
                         }
-                        sleep(30);
+                        synchronized ( maxParticipants ) {
+                            maxParticipants.add(max);
+                        }
+                        sleep(job.getProperty("sleep", 30));
                         parallelCount.decrementAndGet();
                         return JobResult.OK;
                     }
                 });
-        final ServiceRegistration ehReg = this.registerEventHandler(JobUtil.TOPIC_JOB_FINISHED,
+        this.registerEventHandler(NotificationConstants.TOPIC_JOB_FINISHED,
                 new EventHandler() {
 
                     @Override
@@ -126,47 +128,45 @@ public class RoundRobinQueueTest extends AbstractJobHandlingTest {
                     }
                 });
 
-        try {
-            // we first sent one event to get the queue started
-            jobManager.addJob(TOPIC + "/start", null, null);
-            assertTrue("No event received in the given time.", cb.block(5));
-            cb.reset();
+        // we first sent one event to get the queue started
+        jobManager.addJob(TOPIC + "/start", null);
+        assertTrue("No event received in the given time.", cb.block(5));
+        cb.reset();
 
-            // get the queue
-            final Queue q = jobManager.getQueue(QUEUE_NAME);
-            assertNotNull("Queue '" + QUEUE_NAME + "' should exist!", q);
+        // get the queue
+        final Queue q = jobManager.getQueue(QUEUE_NAME);
+        assertNotNull("Queue '" + QUEUE_NAME + "' should exist!", q);
 
-            // suspend it
-            q.suspend();
+        // suspend it
+        q.suspend();
 
-            // we start "some" jobs:
-            // first jobs without id
-            for(int i = 0; i < NUM_JOBS; i++ ) {
-                final String subTopic = TOPIC + "/sub" + (i % 10);
-                jobManager.addJob(subTopic, null, null);
+        // we start "some" jobs:
+        for(int i = 0; i < NUM_JOBS; i++ ) {
+            final String subTopic = TOPIC + "/sub" + (i % 10);
+            final Map<String, Object> props = new HashMap<String, Object>();
+            if ( i < 10 ) {
+                props.put("sleep", 300);
+            } else {
+                props.put("sleep", 30);
             }
-            // second jobs with id
-            for(int i = 0; i < NUM_JOBS; i++ ) {
-                final String subTopic = TOPIC + "/sub" + (i % 10);
-                jobManager.addJob(subTopic, "id" + i, null);
-            }
-            // start the queue
-            q.resume();
-            while ( count.get() < 2 * NUM_JOBS  + 1 ) {
-                assertEquals("Failed count", 0, q.getStatistics().getNumberOfFailedJobs());
-                assertEquals("Cancelled count", 0, q.getStatistics().getNumberOfCancelledJobs());
-                sleep(500);
-            }
-            // we started one event before the test, so add one
-            assertEquals("Finished count", 2 * NUM_JOBS + 1, count.get());
-            assertEquals("Finished count", 2 * NUM_JOBS + 1, jobManager.getStatistics().getNumberOfFinishedJobs());
-            assertEquals("Finished count", 2 * NUM_JOBS + 1, q.getStatistics().getNumberOfFinishedJobs());
+            jobManager.addJob(subTopic, props);
+        }
+        // start the queue
+        q.resume();
+        while ( count.get() < NUM_JOBS  + 1 ) {
             assertEquals("Failed count", 0, q.getStatistics().getNumberOfFailedJobs());
             assertEquals("Cancelled count", 0, q.getStatistics().getNumberOfCancelledJobs());
-        } finally {
-            jc1Reg.unregister();
-            jcReg.unregister();
-            ehReg.unregister();
+            sleep(300);
+        }
+        // we started one event before the test, so add one
+        assertEquals("Finished count", NUM_JOBS + 1, count.get());
+        assertEquals("Finished count", NUM_JOBS + 1, jobManager.getStatistics().getNumberOfFinishedJobs());
+        assertEquals("Finished count", NUM_JOBS + 1, q.getStatistics().getNumberOfFinishedJobs());
+        assertEquals("Failed count", 0, q.getStatistics().getNumberOfFailedJobs());
+        assertEquals("Cancelled count", 0, q.getStatistics().getNumberOfCancelledJobs());
+        for(int i=1; i <= MAX_PAR; i++) {
+            assertTrue("# Participants " + String.valueOf(i) + " not in " + maxParticipants,
+                    maxParticipants.contains(i));
         }
     }
 }

@@ -53,6 +53,8 @@ import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.event.Event;
 import org.osgi.service.event.EventHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The Java engine
@@ -63,14 +65,16 @@ import org.osgi.service.event.EventHandler;
 @Properties({
     @Property(name="service.vendor", value="The Apache Software Foundation"),
     @Property(name="service.description", value="Java Servlet Script Handler"),
-    @Property(name=JavaScriptEngineFactory.PROPERTY_COMPILER_SOURCE_V_M, value=JavaScriptEngineFactory.DEFAULT_VM_VERSION),
-    @Property(name=JavaScriptEngineFactory.PROPERTY_COMPILER_TARGET_V_M, value=JavaScriptEngineFactory.DEFAULT_VM_VERSION),
+    @Property(name=JavaScriptEngineFactory.PROPERTY_COMPILER_SOURCE_V_M, value=JavaScriptEngineFactory.VERSION_AUTO),
+    @Property(name=JavaScriptEngineFactory.PROPERTY_COMPILER_TARGET_V_M, value=JavaScriptEngineFactory.VERSION_AUTO),
     @Property(name=JavaScriptEngineFactory.PROPERTY_CLASSDEBUGINFO, boolValue=true),
     @Property(name=JavaScriptEngineFactory.PROPERTY_ENCODING, value="UTF-8")
 })
 public class JavaScriptEngineFactory
     extends AbstractScriptEngineFactory
     implements EventHandler {
+
+    private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
     public static final String PROPERTY_COMPILER_SOURCE_V_M = "java.compilerSourceVM";
 
@@ -80,8 +84,7 @@ public class JavaScriptEngineFactory
 
     public static final String PROPERTY_ENCODING = "java.javaEncoding";
 
-    /** Default source and target VM version (value is "1.5"). */
-    public static final String DEFAULT_VM_VERSION = "1.5";
+    public static final String VERSION_AUTO = "auto";
 
     @Reference
     private JavaCompiler javaCompiler;
@@ -130,6 +133,7 @@ public class JavaScriptEngineFactory
     /**
      * @see javax.script.ScriptEngineFactory#getParameter(String)
      */
+    @Override
     public Object getParameter(String name) {
         if ("THREADING".equals(name)) {
             return "STATELESS";
@@ -145,8 +149,8 @@ public class JavaScriptEngineFactory
      */
     @SuppressWarnings("unchecked")
     protected void activate(final ComponentContext componentContext) {
-        this.ioProvider = new SlingIOProvider(this.javaCompiler,
-                                              CompilerOptions.createOptions(componentContext.getProperties()));
+        final CompilerOptions opts = CompilerOptions.createOptions(componentContext.getProperties());
+        this.ioProvider = new SlingIOProvider(this.javaCompiler, opts);
         this.javaServletContext = new JavaServletContext(ioProvider,
             slingServletContext);
 
@@ -161,6 +165,7 @@ public class JavaScriptEngineFactory
 
         this.eventHandlerRegistration = componentContext.getBundleContext()
                   .registerService(EventHandler.class.getName(), this, props);
+        logger.info("Activating Apache Sling Script Engine for Java with options {}", opts);
     }
 
     /**
@@ -178,11 +183,12 @@ public class JavaScriptEngineFactory
         }
         javaServletContext = null;
         servletConfig = null;
+        logger.info("Deactivating Apache Sling Script Engine for Java");
     }
 
     /**
      * Call the servlet.
-     * @param binding The bindings for the script invocation
+     * @param bindings The bindings for the script invocation
      * @param scriptHelper The script helper.
      * @param context The script context.
      * @throws SlingServletException

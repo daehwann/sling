@@ -37,6 +37,11 @@ import aQute.bnd.annotation.ProviderType;
  * property. Services registered by the whiteboard pattern can by default run concurrently,
  * which usually is not wanted. Therefore it is advisable to also set the
  * {@link #PROPERTY_SCHEDULER_CONCURRENT} property with Boolean.FALSE.
+ *
+ * Jobs started through  the scheduler API are not persisted and are not
+ * restarted after a bundle restart. If the client bundle is stopped, the scheduler
+ * will stop all jobs started by this bundle as well. However, the client bundle does
+ * not need to keep a reference to the scheduler service.
  */
 @ProviderType
 public interface Scheduler {
@@ -63,6 +68,12 @@ public interface Scheduler {
 
     /** Name of the configuration property to define the job name. */
     String PROPERTY_SCHEDULER_NAME = "scheduler.name";
+
+    /** Name of the optional configuration property to define the number of times the job
+     * should be executed when {@link #PROPERTY_SCHEDULER_PERIOD} is defined.
+     * This property is of type integer and must have a positive value.
+     */
+    String PROPERTY_SCHEDULER_TIMES = "scheduler.times";
 
     /**
      * Name of the configuration property to define the instances this job should run on.
@@ -93,11 +104,23 @@ public interface Scheduler {
     /**
      * Schedule a job based on the options.
      *
-     * Note that if a job with the same name has already been added, the old job is cancelled and this new job replaces
+     * Note that if a job with the same name has already been added, the old job is
+     * cancelled and this new job replaces
      * the old job.
      *
-     * The job object needs either to be a {@link Job} or a {@link Runnable}. The options have to be created
+     * The job object needs either to be a {@link Job} or a {@link Runnable}. The
+     * options have to be created
      * by one of the provided methods from this scheduler.
+     *
+     * The job is only started on this instance - if it is started at all. The
+     * options for running on a single instance, on the leader etc. (see
+     * {@link ScheduleOptions#onInstancesOnly(String[])},
+     * {@link ScheduleOptions#onLeaderOnly(boolean)},
+     * and {@link ScheduleOptions#onSingleInstanceOnly(boolean)}) are only useful,
+     * if the same job is scheduled on all instances in a cluster. In this case this
+     * extra configuration controls on which instances the job is really started.
+     * Using the above options might not start the job on the current instance, for
+     * example if the current instance is not the leader.
      *
      * @param job The job to execute (either {@link Job} or {@link Runnable}).
      * @param options Required options defining how to schedule the job

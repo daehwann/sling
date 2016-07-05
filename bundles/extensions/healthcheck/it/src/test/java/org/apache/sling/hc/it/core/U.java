@@ -17,6 +17,7 @@
  */
 package org.apache.sling.hc.it.core;
 
+import static org.junit.Assert.fail;
 import static org.ops4j.pax.exam.CoreOptions.junitBundles;
 import static org.ops4j.pax.exam.CoreOptions.mavenBundle;
 import static org.ops4j.pax.exam.CoreOptions.options;
@@ -24,13 +25,44 @@ import static org.ops4j.pax.exam.CoreOptions.provision;
 import static org.ops4j.pax.exam.CoreOptions.systemProperty;
 import static org.ops4j.pax.exam.CoreOptions.when;
 
+import java.util.Arrays;
+import java.util.List;
+
+import org.apache.sling.hc.api.execution.HealthCheckExecutionOptions;
+import org.apache.sling.hc.api.execution.HealthCheckExecutionResult;
+import org.apache.sling.hc.api.execution.HealthCheckExecutor;
 import org.ops4j.pax.exam.Option;
 
 /** Test utilities */
 public class U {
+
+    /** Wait until the specified number of health checks are seen by supplied executor */
+    static void expectHealthChecks(int howMany, HealthCheckExecutor executor, String ... tags) {
+        expectHealthChecks(howMany, executor, new HealthCheckExecutionOptions(), tags);
+    }
+    
+    /** Wait until the specified number of health checks are seen by supplied executor */
+    static void expectHealthChecks(int howMany, HealthCheckExecutor executor, HealthCheckExecutionOptions options, String ... tags) {
+        final long timeout = System.currentTimeMillis() + 10000L;
+        int count = 0;
+        while(System.currentTimeMillis() < timeout) {
+            final List<HealthCheckExecutionResult> results = executor.execute(options, tags);
+            count = results.size();
+            if(count== howMany) {
+                return;
+            }
+            try {
+                Thread.sleep(100L);
+            } catch(InterruptedException iex) {
+                throw new RuntimeException("Unexpected InterruptedException");
+            }
+        }
+        fail("Did not get " + howMany + " health checks with tags " + Arrays.asList(tags) + " after " + timeout + " msec (last count=" + count + ")");
+    }
     
     static Option[] config() {
         final String coreVersion = System.getProperty("sling.hc.core.version");
+        final String samplesVersion = System.getProperty("sling.hc.samples.version");
         final String localRepo = System.getProperty("maven.repo.local", "");
         final boolean felixShell = "true".equals(System.getProperty("felix.shell", "false"));
 
@@ -43,13 +75,18 @@ public class U {
                     provision(
                             mavenBundle("org.apache.felix", "org.apache.felix.gogo.shell", "0.10.0"),
                             mavenBundle("org.apache.felix", "org.apache.felix.gogo.runtime", "0.10.0"),
-                            mavenBundle("org.apache.felix", "org.apache.felix.gogo.command", "0.12.0")
+                            mavenBundle("org.apache.felix", "org.apache.felix.gogo.command", "0.12.0"),
+                            mavenBundle("org.apache.felix", "org.apache.felix.shell.remote", "1.1.2")
                     )
             ),
             provision(
                     mavenBundle("org.apache.felix", "org.apache.felix.scr", "1.6.2"),
+                    mavenBundle("org.apache.felix", "org.apache.felix.configadmin", "1.8.8"),
+                    mavenBundle("org.apache.felix", "org.apache.felix.http.servlet-api", "1.1.0"),
                     mavenBundle("org.apache.sling", "org.apache.sling.hc.core", coreVersion),
+                    mavenBundle("org.apache.sling", "org.apache.sling.hc.samples", samplesVersion),
                     mavenBundle("org.apache.sling", "org.apache.sling.commons.osgi", "2.2.0"),
+                    mavenBundle("org.apache.sling", "org.apache.sling.commons.json", "2.0.10"),
                     mavenBundle("org.apache.sling", "org.apache.sling.jcr.jcr-wrapper", "2.0.0"),
                     mavenBundle("org.apache.sling", "org.apache.sling.api", "2.4.2"),
                     mavenBundle("org.apache.sling", "org.apache.sling.jcr.api", "2.1.0"),
@@ -60,6 +97,7 @@ public class U {
                     mavenBundle("org.apache.sling", "org.apache.sling.launchpad.api", "1.1.0"),
                     mavenBundle("org.apache.sling", "org.apache.sling.scripting.api", "2.1.0"),
                     mavenBundle("org.apache.sling", "org.apache.sling.commons.threads", "3.1.0"),
+                    mavenBundle("org.apache.sling", "org.apache.sling.commons.scheduler", "2.4.2"),
                     mavenBundle("commons-collections", "commons-collections", "3.2.1"),
                     mavenBundle("commons-io", "commons-io", "1.4"),
                     mavenBundle("commons-fileupload", "commons-fileupload", "1.2.2"),

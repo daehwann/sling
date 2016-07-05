@@ -18,6 +18,8 @@
  */
 package org.apache.sling.api.servlets;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
 import javax.servlet.Servlet;
 
 import org.apache.sling.api.SlingHttpServletRequest;
@@ -34,7 +36,6 @@ import aQute.bnd.annotation.ProviderType;
  * Applications of the Sling Framework generally do not need the servlet
  * resolver as resolution of the servlets to process requests and sub-requests
  * through a <code>RequestDispatcher</code> is handled by the Sling Framework.
- * <p>
  */
 @ProviderType
 public interface ServletResolver {
@@ -56,13 +57,13 @@ public interface ServletResolver {
      * @param request The {@link SlingHttpServletRequest} object used to drive
      *            selection of the servlet.
      * @return The servlet whose <code>service</code> method may be called to
-     *         handle the request.
-     * @throws org.apache.sling.api.SlingException Is thrown if an error occurrs
+     *         handle the request. Might be {@code null}.
+     * @throws org.apache.sling.api.SlingException Is thrown if an error occurs
      *             while trying to find an appropriate servlet to handle the
-     *             request or if no servlet could be resolved to handle the
      *             request.
+     * @throws NullPointerException If {@code request} is null.
      */
-    Servlet resolveServlet(SlingHttpServletRequest request);
+    @CheckForNull Servlet resolveServlet(@Nonnull SlingHttpServletRequest request);
 
     /**
      * Resolves a <code>javax.servlet.Servlet</code> whose
@@ -76,21 +77,23 @@ public interface ServletResolver {
      * request object available.
      *
      * Basically this method searches a script with the <code>scriptName</code>
-     * for the resource type defined by the <code>resource</code>
+     * for the resource type defined by the <code>resource</code>.
+     *
      * @param resource The {@link Resource} object used to drive
      *            selection of the servlet.
      * @param scriptName The name of the script - the script might have an
      *                   extension. In this case only a script with the
      *                   matching extension is used.
      * @return The servlet whose <code>service</code> method may be called to
-     *         handle the request.
-     * @throws org.apache.sling.api.SlingException Is thrown if an error occurrs
+     *         handle the request. Might be {@code null}.
+     * @throws org.apache.sling.api.SlingException Is thrown if an error occurs
      *             while trying to find an appropriate servlet to handle the
      *             request or if no servlet could be resolved to handle the
      *             request.
-     * @since 2.1
+     * @throws IllegalArgumentException If {@code resource} is null.
+     * @since 2.1 (Sling API Bundle 2.1.0)
      */
-    Servlet resolveServlet(Resource resource, String scriptName);
+    @CheckForNull Servlet resolveServlet(@Nonnull Resource resource, @Nonnull String scriptName);
 
     /**
      * Resolves a <code>javax.servlet.Servlet</code> whose
@@ -110,13 +113,13 @@ public interface ServletResolver {
      *                   extension. In this case only a script with the
      *                   matching extension is used.
      * @return The servlet whose <code>service</code> method may be called to
-     *         handle the request.
-     * @throws org.apache.sling.api.SlingException Is thrown if an error occurrs
+     *         handle the request. Might be {@code null}.
+     * @throws org.apache.sling.api.SlingException Is thrown if an error occurs
      *             while trying to find an appropriate servlet to handle the
-     *             request or if no servlet could be resolved to handle the
      *             request.
-     * @since 2.1
+     * @throws IllegalArgumentException If {@code resolver} is null.
+     * @since 2.1 (Sling API Bundle 2.1.0)
      */
-    Servlet resolveServlet(ResourceResolver resolver, String scriptName);
+    @CheckForNull Servlet resolveServlet(@Nonnull ResourceResolver resolver, @Nonnull String scriptName);
 
 }

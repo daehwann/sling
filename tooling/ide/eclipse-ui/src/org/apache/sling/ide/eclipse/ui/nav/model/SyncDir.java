@@ -16,10 +16,11 @@
  */
 package org.apache.sling.ide.eclipse.ui.nav.model;
 
-import org.apache.sling.ide.eclipse.ui.internal.SharedImages;
+import java.util.StringTokenizer;
+
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
-import org.eclipse.swt.graphics.Image;
+import org.eclipse.core.resources.IResource;
 
 /** WIP: model object for the syncDir [root] shown in the content package view in project explorer **/
 public class SyncDir extends JcrNode {
@@ -32,11 +33,21 @@ public class SyncDir extends JcrNode {
 		}
 		this.folder = folder;
 		setResource(folder);
+		SyncDirManager.registerNewSyncDir(this);
 	}
 	
 	@Override
 	public int hashCode() {
 		return folder.hashCode();
+	}
+	
+	@Override
+	protected boolean childShouldNotBeShown(IResource resource) {
+	    // WTP Dynamic Web projects automatically create WEB-INF/lib and META-INF/MANIFEST.MF in the
+	    // web content directory, even though they don't make sense for Sling projects
+	    // So just ignore these in our own navigator
+	    return resource.getType() == IResource.FOLDER && 
+	            ( resource.getName().equals("WEB-INF") || resource.getName().equals("META-INF"));
 	}
 	
 	@Override
@@ -47,14 +58,9 @@ public class SyncDir extends JcrNode {
 		}
 		return false;
 	}
-	
-	@Override
-	public Image getImage() {
-		return SharedImages.SLING_ICON.createImage();
-	}
 
 	public String getLabel() {
-		return folder.getProjectRelativePath()+" [sling synched]";
+        return folder.getProjectRelativePath().toString();
 	}
 	
 	@Override
@@ -72,8 +78,48 @@ public class SyncDir extends JcrNode {
 	}
 	
 	@Override
+	String getJcrPathName() {
+	    return "/";
+	}
+	
+	@Override
 	public IFile getFileForEditor() {
 		return null;
 	}
+	
+	@Override
+	public SyncDir getSyncDir() {
+	    return this;
+	}
 
+	public JcrNode getNode(String path) {
+	    StringTokenizer st = new StringTokenizer(path, "/");
+	    JcrNode node = SyncDirManager.getSyncDirOrNull(folder);
+	    while(st.hasMoreTokens()) {
+	        String nodeName = st.nextToken();
+	        node.getChildren(true);
+	        JcrNode child = node.getChild(nodeName);
+	        if (child==null) {
+	            return null;
+	        }
+	        node = child;
+	    }
+	    return node;
+	}
+	
+	@Override
+	public boolean canBeRenamed() {
+	    return false;
+	}
+	
+	@Override
+	public boolean canBeDeleted() {
+	    return false;
+	}
+	
+	@Override
+	public IResource getResourceForImportExport() {
+	    return folder;
+	}
+	
 }

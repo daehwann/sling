@@ -24,12 +24,18 @@ import java.util.StringTokenizer;
 import org.apache.maven.archetype.catalog.Archetype;
 import org.apache.maven.archetype.metadata.RequiredProperty;
 import org.apache.maven.artifact.repository.ArtifactRepository;
+import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.jface.dialogs.IDialogPage;
 import org.eclipse.jface.viewers.CellEditor;
 import org.eclipse.jface.viewers.CellNavigationStrategy;
+import org.eclipse.jface.viewers.ColumnViewerEditor;
+import org.eclipse.jface.viewers.ColumnViewerEditorActivationEvent;
+import org.eclipse.jface.viewers.ColumnViewerEditorActivationStrategy;
 import org.eclipse.jface.viewers.FocusCellOwnerDrawHighlighter;
 import org.eclipse.jface.viewers.ICellModifier;
 import org.eclipse.jface.viewers.TableViewer;
+import org.eclipse.jface.viewers.TableViewerEditor;
 import org.eclipse.jface.viewers.TableViewerFocusCellManager;
 import org.eclipse.jface.viewers.TextCellEditor;
 import org.eclipse.jface.wizard.WizardPage;
@@ -64,7 +70,7 @@ public class ArchetypeParametersWizardPage extends WizardPage {
 	
 	private boolean javaPackageModified;
 
-	private final AbstractNewSlingApplicationWizard parent;
+	private final AbstractNewMavenBasedSlingApplicationWizard parent;
 
 	private TableViewer propertiesViewer;
 
@@ -74,11 +80,11 @@ public class ArchetypeParametersWizardPage extends WizardPage {
 
 	private Text version;
 	
-	public ArchetypeParametersWizardPage(AbstractNewSlingApplicationWizard parent) {
+	public ArchetypeParametersWizardPage(AbstractNewMavenBasedSlingApplicationWizard parent) {
 		super("archetypeParametersPage");
 		this.parent = parent;
 		setTitle("Configure Archetype Properties");
-		setDescription("This step configured the archetype properties");
+        setDescription("This step configures the archetype properties");
 		setImageDescriptor(parent.getLogo());
 	}
 
@@ -178,6 +184,26 @@ public class ArchetypeParametersWizardPage extends WizardPage {
 		TableViewerFocusCellManager focusCellMgr = new TableViewerFocusCellManager(propertiesViewer,
 	    		new FocusCellOwnerDrawHighlighter(propertiesViewer),
 	    		strategy);
+		
+        ColumnViewerEditorActivationStrategy actSupport = new ColumnViewerEditorActivationStrategy(
+                propertiesViewer){
+
+            @Override
+            protected boolean isEditorActivationEvent(
+                    ColumnViewerEditorActivationEvent event) {
+                return event.eventType == ColumnViewerEditorActivationEvent.TRAVERSAL
+                        || event.eventType == ColumnViewerEditorActivationEvent.MOUSE_DOUBLE_CLICK_SELECTION
+                        || (event.eventType == ColumnViewerEditorActivationEvent.KEY_PRESSED && event.keyCode == SWT.CR)
+                        || event.eventType == ColumnViewerEditorActivationEvent.PROGRAMMATIC;
+            }
+        };
+        int features = ColumnViewerEditor.TABBING_HORIZONTAL
+                | ColumnViewerEditor.TABBING_MOVE_TO_ROW_NEIGHBOR
+                | ColumnViewerEditor.TABBING_VERTICAL
+                | ColumnViewerEditor.KEYBOARD_ACTIVATION
+                | ColumnViewerEditor.KEEP_EDITOR_ON_DOUBLE_CLICK;
+        TableViewerEditor.create(propertiesViewer, focusCellMgr, actSupport, features);		
+		
 	    
 	    TableColumn propertiesTableNameColumn = new TableColumn(propertiesTable, SWT.NONE);
 	    propertiesTableNameColumn.setWidth(130);
@@ -289,6 +315,14 @@ public class ArchetypeParametersWizardPage extends WizardPage {
 			updateStatus("package must be specified");
 			return;
 		}
+
+        IProject existingProject = ResourcesPlugin.getWorkspace().getRoot().getProject(artifactId.getText());
+
+        if (existingProject.exists()) {
+            updateStatus("A project with the name " + artifactId.getText() + " already exists.");
+            return;
+        }
+
 		int cnt = propertiesTable.getItemCount();
 		for(int i=0; i<cnt; i++) {
 			TableItem item = propertiesTable.getItem(i);

@@ -17,25 +17,40 @@
  */
 package org.apache.sling.resourceresolver.impl;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Dictionary;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 
 import javax.servlet.http.HttpServletRequest;
 
 import org.apache.sling.api.resource.LoginException;
-import org.apache.sling.api.resource.QueriableResourceProvider;
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceMetadata;
-import org.apache.sling.api.resource.ResourceProvider;
-import org.apache.sling.api.resource.ResourceProviderFactory;
 import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.api.resource.ResourceResolverFactory;
 import org.apache.sling.api.resource.ValueMap;
+import org.apache.sling.api.wrappers.ValueMapDecorator;
+import org.apache.sling.resourceresolver.impl.observation.ResourceChangeListenerWhiteboard;
+import org.apache.sling.resourceresolver.impl.providers.ResourceProviderHandler;
+import org.apache.sling.resourceresolver.impl.providers.ResourceProviderInfo;
+import org.apache.sling.resourceresolver.impl.providers.ResourceProviderStorage;
+import org.apache.sling.resourceresolver.impl.providers.ResourceProviderTracker;
+import org.apache.sling.spi.resource.provider.QueryLanguageProvider;
+import org.apache.sling.spi.resource.provider.ResolveContext;
+import org.apache.sling.spi.resource.provider.ResourceContext;
+import org.apache.sling.spi.resource.provider.ResourceProvider;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -48,8 +63,8 @@ import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
 import org.osgi.framework.ServiceFactory;
+import org.osgi.framework.ServiceReference;
 import org.osgi.service.component.ComponentContext;
-import org.osgi.service.event.EventAdmin;
 
 /**
  * This tests the ResourceResolver using mocks. The Unit test is in addition to
@@ -63,14 +78,15 @@ import org.osgi.service.event.EventAdmin;
 public class MockedResourceResolverImplTest {
 
     private static final List<Resource> EMPTY_RESOURCE_LIST = new ArrayList<Resource>();
+    private static final String FAKE_QUERY_LANGUAGE = "fake";
+    private static final String PATH = "path";
 
     private ResourceResolverFactoryActivator activator;
 
-    @Mock
-    private ComponentContext componentContext;
+    private List<ResourceProviderHandler> handlers = new ArrayList<ResourceProviderHandler>();
 
     @Mock
-    private EventAdmin eventAdmin;
+    private ComponentContext componentContext;
 
     @Mock
     private BundleContext bundleContext;
@@ -81,6 +97,16 @@ public class MockedResourceResolverImplTest {
     @Mock
     private BundleContext usingBundleContext;
 
+    @Mock
+    private ResourceProviderTracker resourceProviderTracker;
+
+    @Mock
+    private ResourceChangeListenerWhiteboard resourceChangeListenerWhiteboard;
+
+    @SuppressWarnings("rawtypes")
+    @Mock
+    private QueryLanguageProvider queryProvider;
+
     private Map<String, Object> services = new HashMap<String, Object>();
 
     private Map<String, Object> serviceProperties = new HashMap<String, Object>();
@@ -88,31 +114,25 @@ public class MockedResourceResolverImplTest {
     private ResourceResolverFactoryImpl resourceResolverFactory;
 
     @Mock
-    private ResourceProvider resourceProvider;
-
-    @Mock
-    private ResourceProviderFactory resourceProviderFactory;
-
-    /**
-     * the factory creates these.
-     */
-    @Mock
-    private ResourceProvider factoryResourceProvider;
-
-    @Mock
-    private ResourceProvider factoryAdministrativeResourceProvider;
+    private ResourceProvider<?> resourceProvider;
 
     /**
      * deals with /etc resolution.
      */
     @Mock
-    private ResourceProvider mappingResourceProvider;
+    private ResourceProvider<?> mappingResourceProvider;
 
     /**
      * deals with /apps and /libs resolution.
      */
     @Mock
-    private ResourceProvider appsResourceProvider;
+    private ResourceProvider<?> appsResourceProvider;
+
+    /**
+     * QueriableResourceProviders
+     */
+    @Mock
+    private ResourceProvider<?> queriableResourceProviderA;
 
 
     public MockedResourceResolverImplTest() {
@@ -127,46 +147,27 @@ public class MockedResourceResolverImplTest {
         Mockito.when(componentContext.getProperties()).thenReturn(buildBundleProperties());
         Mockito.when(componentContext.getBundleContext()).thenReturn(
             bundleContext);
-        activator.eventAdmin = eventAdmin;
-        activator.resourceAccessSecurityTracker = new ResourceAccessSecurityTracker();
 
-        activator.bindResourceProvider(resourceProvider,
-            buildResourceProviderProperties("org.apache.sling.resourceresolver.impl.DummyTestProvider",
-                10L,
-                new String[] { "/single" }));
+        activator.resourceAccessSecurityTracker = new ResourceAccessSecurityTracker();
+        activator.resourceProviderTracker = resourceProviderTracker;
+        activator.changeListenerWhiteboard = resourceChangeListenerWhiteboard;
+
+        handlers.add(createRPHandler(resourceProvider, "org.apache.sling.resourceresolver.impl.DummyTestProvider", 10L, "/single"));
 
         // setup mapping resources at /etc/map to exercise vanity etc.
         // hmm, can't provide the resolver since its not up and ready.
         // mapping almost certainly work properly until this can be setup correctly.
         buildMappingResource("/etc/map", mappingResourceProvider, null);
 
-        activator.bindResourceProvider(mappingResourceProvider,
-            buildResourceProviderProperties("org.apache.sling.resourceresolver.impl.MapProvider",
-                11L,
-                new String[] { "/etc" }));
+        handlers.add(createRPHandler(mappingResourceProvider, "org.apache.sling.resourceresolver.impl.MapProvider", 11L, "/etc"));
+        handlers.add(createRPHandler(appsResourceProvider, "org.apache.sling.resourceresolver.impl.AppsProvider", 12L, "/libs"));
+        handlers.add(createRPHandler(appsResourceProvider, "org.apache.sling.resourceresolver.impl.AppsProvider", 13L, "/apps"));
+        handlers.add(createRPHandler(queriableResourceProviderA, "org.apache.sling.resourceresolver.impl.QueriableResourceProviderA", 14L, "/searchA"));
+        Mockito.when(queriableResourceProviderA.getQueryLanguageProvider()).thenReturn(queryProvider);
 
-        // bind a ResourceProviderFactory to satidy the pre-requirements
-        Mockito.when(resourceProviderFactory.getResourceProvider(null)).thenReturn(
-            factoryResourceProvider);
-        Mockito.when(
-            resourceProviderFactory.getResourceProvider(Mockito.anyMap())).thenReturn(
-            factoryResourceProvider);
-        Mockito.when(
-            resourceProviderFactory.getAdministrativeResourceProvider(null)).thenReturn(
-            factoryAdministrativeResourceProvider);
-        Mockito.when(
-            resourceProviderFactory.getAdministrativeResourceProvider(Mockito.anyMap())).thenReturn(
-            factoryAdministrativeResourceProvider);
+        ResourceProviderStorage storage = new ResourceProviderStorage(handlers);
 
-        activator.bindResourceProviderFactory(resourceProviderFactory,
-            buildResourceProviderProperties("org.apache.sling.resourceresolver.impl.DummyTestProviderFactory",
-                12L,
-                new String[] { "/factory" } ));
-
-        activator.bindResourceProvider(appsResourceProvider,
-            buildResourceProviderProperties("org.apache.sling.resourceresolver.impl.AppsProvider",
-                13L,
-                new String[] { "/apps", "/libs" }));
+        Mockito.when(resourceProviderTracker.getResourceProviderStorage()).thenReturn(storage);
 
         // activate the components.
         activator.activate(componentContext);
@@ -203,8 +204,28 @@ public class MockedResourceResolverImplTest {
         resourceResolverFactory = (ResourceResolverFactoryImpl) rrf;
     }
 
+    public static ResourceProviderHandler createRPHandler(ResourceProvider<?> rp, String pid, long ranking,
+            String path) {
+        ServiceReference ref = Mockito.mock(ServiceReference.class);
+        BundleContext bc = Mockito.mock(BundleContext.class);
+        Mockito.when(bc.getService(Mockito.eq(ref))).thenReturn(rp);
+        Mockito.when(ref.getProperty(Mockito.eq(Constants.SERVICE_ID))).thenReturn(new Random().nextLong());
+        Mockito.when(ref.getProperty(Mockito.eq(Constants.SERVICE_PID))).thenReturn(pid);
+        Mockito.when(ref.getProperty(Mockito.eq(Constants.SERVICE_RANKING))).thenReturn(ranking);
+        Mockito.when(ref.getProperty(Mockito.eq(ResourceProvider.PROPERTY_ROOT))).thenReturn(path);
+        Mockito.when(ref.getProperty(Mockito.eq(ResourceProvider.PROPERTY_MODIFIABLE))).thenReturn(true);
+        Mockito.when(ref.getProperty(Mockito.eq(ResourceProvider.PROPERTY_ATTRIBUTABLE))).thenReturn(true);
+        Mockito.when(ref.getProperty(Mockito.eq(ResourceProvider.PROPERTY_ADAPTABLE))).thenReturn(true);
+
+        ResourceProviderInfo info = new ResourceProviderInfo(ref);
+        final ResourceProviderHandler handler = new ResourceProviderHandler(bc, info);
+        handler.activate();
+        return handler;
+    }
+
+    @SuppressWarnings("unchecked")
     private Resource buildMappingResource(String path,
-            ResourceProvider provider, ResourceResolver resourceResolver) {
+            ResourceProvider<?> provider, ResourceResolver resourceResolver) {
         List<Resource> localHostAnyList = new ArrayList<Resource>();
         localHostAnyList.add(buildResource(path+"/http/example.com.80/cgi-bin", EMPTY_RESOURCE_LIST, resourceResolver, provider, "sling:internalRedirect", "/scripts" ));
         localHostAnyList.add(buildResource(path+"/http/example.com.80/gateway", EMPTY_RESOURCE_LIST, resourceResolver, provider,"sling:internalRedirect", "http://gbiv.com"));
@@ -217,25 +238,13 @@ public class MockedResourceResolverImplTest {
         mappingChildren.add(buildResource(path+"/http/localhost_any", localHostAnyList, resourceResolver, provider,"sling:match", "localhost\\.\\d*", "sling:internalRedirect", "/content"));
 
         Resource etcMapResource = buildResource(path+"/http", mappingChildren);
-        Mockito.when(provider.getResource(Mockito.any(ResourceResolver.class), Mockito.eq(path))).thenReturn(etcMapResource);
+        Mockito.when(provider.getResource(Mockito.any(ResolveContext.class), Mockito.eq(path), Mockito.any(ResourceContext.class), Mockito.any(Resource.class))).thenReturn(etcMapResource);
         return etcMapResource;
     }
 
     @After
     public void after() {
-        activator.unbindResourceProvider(resourceProvider,
-            buildResourceProviderProperties("org.apache.sling.resourceresolver.impl.DummyTestProvider",
-                                            10L,
-                                            new String[] { "/single" }));
-        activator.unbindResourceProvider(mappingResourceProvider,
-            buildResourceProviderProperties("org.apache.sling.resourceresolver.impl.MapProvider",
-                                            11L,
-                                            new String[] { "/etc" }));
-        activator.bindResourceProviderFactory(resourceProviderFactory,
-            buildResourceProviderProperties("org.apache.sling.resourceresolver.impl.DummyTestProviderFactory",
-                                            12L,
-                                            new String[] { "/factory" } ));
-
+        handlers.clear();
     }
 
     /**
@@ -257,7 +266,18 @@ public class MockedResourceResolverImplTest {
      * @return
      */
     private Resource buildResource(String fullpath, Iterable<Resource> children) {
-        return buildResource(fullpath, children, null, null, null);
+        return buildResource(fullpath, children, null, null, new String[0]);
+    }
+
+    /** Build a List of ValueMap */
+    private List<ValueMap> buildValueMapCollection(int howMany, String pathPrefix) {
+        final List<ValueMap> result = new ArrayList<ValueMap>();
+        for(int i=0;  i < howMany; i++) {
+            final Map<String, Object> m = new HashMap<String, Object>();
+            m.put(PATH, pathPrefix + i);
+            result.add(new ValueMapDecorator(m));
+        }
+        return result;
     }
 
     /**
@@ -267,7 +287,8 @@ public class MockedResourceResolverImplTest {
      * @param resourceResolver
      * @return
      */
-    private Resource buildResource(String fullpath, Iterable<Resource> children, ResourceResolver resourceResolver, ResourceProvider provider, String ... properties) {
+    @SuppressWarnings("unchecked")
+    private Resource buildResource(String fullpath, Iterable<Resource> children, ResourceResolver resourceResolver, ResourceProvider<?> provider, String ... properties) {
         Resource resource = Mockito.mock(Resource.class);
         Mockito.when(resource.getName()).thenReturn(getName(fullpath));
         Mockito.when(resource.getPath()).thenReturn(fullpath);
@@ -278,14 +299,8 @@ public class MockedResourceResolverImplTest {
 
         // register the resource with the provider
         if ( provider != null ) {
-            Mockito.when(provider.listChildren(resource)).thenReturn(children.iterator());
-            if ( resourceResolver != null) {
-                Mockito.when(provider.getResource(Mockito.eq(resourceResolver), Mockito.eq(fullpath))).thenReturn(resource);
-                Mockito.when(provider.getResource(Mockito.eq(resourceResolver), Mockito.any(HttpServletRequest.class), Mockito.eq(fullpath))).thenReturn(resource);
-            } else {
-                Mockito.when(provider.getResource(Mockito.any(ResourceResolver.class), Mockito.eq(fullpath))).thenReturn(resource);
-                Mockito.when(provider.getResource(Mockito.any(ResourceResolver.class), Mockito.any(HttpServletRequest.class), Mockito.eq(fullpath))).thenReturn(resource);
-            }
+            Mockito.when(provider.listChildren(Mockito.any(ResolveContext.class), Mockito.eq(resource))).thenReturn(children.iterator());
+            Mockito.when(provider.getResource(Mockito.any(ResolveContext.class), Mockito.eq(fullpath), Mockito.any(ResourceContext.class), Mockito.any(Resource.class))).thenReturn(resource);
         }
         if ( properties != null ) {
             ValueMap vm = new SimpleValueMapImpl();
@@ -293,7 +308,11 @@ public class MockedResourceResolverImplTest {
                 resourceMetadata.put(properties[i], properties[i+1]);
                 vm.put(properties[i], properties[i+1]);
             }
+            Mockito.when(resource.getValueMap()).thenReturn(vm);
             Mockito.when(resource.adaptTo(Mockito.eq(ValueMap.class))).thenReturn(vm);
+        } else {
+            Mockito.when(resource.getValueMap()).thenReturn(ValueMapDecorator.EMPTY);
+            Mockito.when(resource.adaptTo(Mockito.eq(ValueMap.class))).thenReturn(ValueMapDecorator.EMPTY);
         }
 
         return resource;
@@ -308,29 +327,6 @@ public class MockedResourceResolverImplTest {
     private String getName(String fullpath) {
         int n = fullpath.lastIndexOf("/");
         return fullpath.substring(n+1);
-    }
-
-
-    /**
-     * Build properties for a resource provider.
-     * @param servicePID
-     * @param serviceID
-     * @param roots
-     * @return
-     */
-    private Map<String, Object> buildResourceProviderProperties(String servicePID, long serviceID, String[] roots) {
-        Map<String, Object> resourceProviderProperties = new HashMap<String, Object>();
-        resourceProviderProperties.put(Constants.SERVICE_PID, servicePID);
-        resourceProviderProperties.put(Constants.SERVICE_ID, serviceID);
-        resourceProviderProperties.put(Constants.SERVICE_VENDOR, "Apache");
-        resourceProviderProperties.put(Constants.SERVICE_DESCRIPTION,
-            "Dummy Provider");
-        resourceProviderProperties.put(QueriableResourceProvider.LANGUAGES,
-                new String[] { "lang1"} );
-
-
-        resourceProviderProperties.put(ResourceProvider.ROOTS, roots);
-        return resourceProviderProperties;
     }
 
     /**
@@ -443,21 +439,6 @@ public class MockedResourceResolverImplTest {
     }
 
     /**
-     * Test getResource for a resource provided by a factory provider.
-     * @throws LoginException
-     */
-    @Test
-    public void testGetFactoryResource() throws LoginException {
-        ResourceResolver resourceResolver = resourceResolverFactory.getResourceResolver(null);
-        Assert.assertNotNull(resourceResolver);
-
-        Resource factoryResource = buildResource("/factory/test", EMPTY_RESOURCE_LIST, resourceResolver, factoryResourceProvider);
-        Resource resource = resourceResolver.getResource("/factory/test");
-        Assert.assertEquals(factoryResource, resource);
-    }
-
-
-    /**
      * Basic test of mapping functionality, at the moment needs more
      * configuration in the virtual /etc/map.
      *
@@ -466,21 +447,21 @@ public class MockedResourceResolverImplTest {
     @Test
     public void testMapping() throws LoginException {
         ResourceResolver resourceResolver = resourceResolverFactory.getResourceResolver(null);
-        buildResource("/factory/test", EMPTY_RESOURCE_LIST, resourceResolver, factoryResourceProvider);
+        buildResource("/single/test", EMPTY_RESOURCE_LIST, resourceResolver, resourceProvider);
         HttpServletRequest request = Mockito.mock(HttpServletRequest.class);
         Mockito.when(request.getScheme()).thenReturn("http");
         Mockito.when(request.getServerPort()).thenReturn(80);
         Mockito.when(request.getServerName()).thenReturn("localhost");
-        String path = resourceResolver.map(request,"/factory/test?q=123123");
-        Assert.assertEquals("/factory/test?q=123123", path);
-        path = resourceResolver.map(request,"/factory/test");
-        Assert.assertEquals("/factory/test", path);
+        String path = resourceResolver.map(request,"/single/test?q=123123");
+        Assert.assertEquals("/single/test?q=123123", path);
+        path = resourceResolver.map(request,"/single/test");
+        Assert.assertEquals("/single/test", path);
 
         // test path mapping without a request.
-        path = resourceResolver.map("/factory/test");
-        Assert.assertEquals("/factory/test", path);
+        path = resourceResolver.map("/single/test");
+        Assert.assertEquals("/single/test", path);
 
-        buildResource("/content", EMPTY_RESOURCE_LIST, resourceResolver, factoryResourceProvider);
+        buildResource("/content", EMPTY_RESOURCE_LIST, resourceResolver, resourceProvider);
         path = resourceResolver.map("/content.html");
         Assert.assertEquals("/content.html", path);
 
@@ -561,4 +542,50 @@ public class MockedResourceResolverImplTest {
         Assert.assertEquals(5,i);
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testQueryResources() throws LoginException {
+        final int n = 3;
+        String[] languages = new String[] {FAKE_QUERY_LANGUAGE};
+        Mockito.when(queryProvider.getSupportedLanguages(Mockito.any(ResolveContext.class))).thenReturn(languages);
+        Mockito.when(queryProvider.queryResources(Mockito.any(ResolveContext.class), Mockito.any(String.class), Mockito.any(String.class)))
+        .thenReturn(buildValueMapCollection(n, "A_").iterator());
+
+        final ResourceResolver rr = resourceResolverFactory.getResourceResolver(null);
+        buildResource("/search/test/withchildren", buildChildResources("/search/test/withchildren"), rr, resourceProvider);
+        final Iterator<Map<String, Object>> it = rr.queryResources("/search", FAKE_QUERY_LANGUAGE);
+        final Set<String> toFind = new HashSet<String>();
+        for(int i=0; i < n; i++) {
+            toFind.add("A_" + i);
+        }
+
+        assertTrue("Expecting non-empty result (" + n + ")", it.hasNext());
+        while(it.hasNext()) {
+            final Map<String, Object> m = it.next();
+            toFind.remove(m.get(PATH));
+        }
+        assertTrue("Expecting no leftovers (" + n + ") in" + toFind, toFind.isEmpty());
+    }
+
+    @Test public void test_versions() throws LoginException {
+        ResourceResolver resourceResolver = resourceResolverFactory.getResourceResolver(null);
+
+        Resource resource = resourceResolver.resolve("/content/test.html;v=1.0");
+        Map<String, String> parameters = resource.getResourceMetadata().getParameterMap();
+        assertEquals("/content/test.html", resource.getPath());
+        assertEquals("test.html", resource.getName());
+        assertEquals(Collections.singletonMap("v", "1.0"), parameters);
+
+        resource = resourceResolver.resolve("/content/test;v='1.0'.html");
+        parameters = resource.getResourceMetadata().getParameterMap();
+        assertEquals("/content/test.html", resource.getPath());
+        assertEquals("test.html", resource.getName());
+        assertEquals(Collections.singletonMap("v", "1.0"), parameters);
+
+        buildResource("/single/test/withchildren", buildChildResources("/single/test/withchildren"), resourceResolver, resourceProvider);
+        resource = resourceResolver.getResource("/single/test/withchildren;v='1.0'");
+        assertNotNull(resource);
+        assertEquals("/single/test/withchildren", resource.getPath());
+        assertEquals("withchildren", resource.getName());
+    }
 }

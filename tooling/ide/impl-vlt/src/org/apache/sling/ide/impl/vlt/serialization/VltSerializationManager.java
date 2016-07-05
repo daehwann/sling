@@ -102,33 +102,51 @@ public class VltSerializationManager implements SerializationManager {
 
         // TODO - refrain from doing I/O here
         // TODO - copied from TransactionImpl
-        InputStream in = null;
-        try {
-            in = new BufferedInputStream(new FileInputStream(file));
+        
+        try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
             SerializationType serType = XmlAnalyzer.analyze(new InputSource(in));
             return serType == SerializationType.XML_DOCVIEW;
         } catch (IOException e) {
             throw new RuntimeException(e);
-        } finally {
-            if (in != null) {
-                try {
-                    in.close();
-                } catch (IOException e) {
-                    // don't care
-                }
-            }
         }
     }
 
     @Override
     public String getBaseResourcePath(String serializationFilePath) {
-        // TODO actually calculate the resource path, this fails for full coverage aggregates
-        if (Constants.DOT_CONTENT_XML.equals(serializationFilePath)) {
-            return "";
+
+        File file = new File(serializationFilePath);
+        String fileName = file.getName();
+        if (fileName.equals(Constants.DOT_CONTENT_XML)) {
+            return file.getParent();
         }
 
-        return serializationFilePath.substring(0, serializationFilePath.length()
-                - (Constants.DOT_CONTENT_XML.length() + 1));
+        if (!fileName.endsWith(EXTENSION_XML)) {
+            return file.getAbsolutePath();
+        }
+
+        // assume that delete file with the xml extension is a full serialization aggregate
+        // TODO - this can generate false results
+        if (!file.exists()) {
+            return getPathWithoutXmlExtension(file);
+        }
+
+        // TODO - refrain from doing I/O here
+        // TODO - copied from TransactionImpl
+        
+        try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
+            SerializationType serType = XmlAnalyzer.analyze(new InputSource(in));
+            if (serType == SerializationType.XML_DOCVIEW) {
+                return getPathWithoutXmlExtension(file);
+            }
+
+            return file.getAbsolutePath();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String getPathWithoutXmlExtension(File file) {
+        return file.getAbsolutePath().substring(0, file.getAbsolutePath().length() - EXTENSION_XML.length());
     }
 
     @Override
@@ -147,14 +165,51 @@ public class VltSerializationManager implements SerializationManager {
         throw new IllegalArgumentException("Unsupported serialization kind " + serializationKind);
     }
 
+    @Override
+    public String getRepositoryPath(String osPath) {
+
+        String repositoryPath;
+        String name = Text.getName(osPath);
+        if (name.equals(Constants.DOT_CONTENT_XML)) {
+            // TODO - this is a bit risky, we might clean legitimate directories which contain '.dir'
+            String parentPath = Text.getRelativeParent(osPath, 1);
+            if (parentPath != null && parentPath.endsWith(".dir")) {
+                parentPath = parentPath.substring(0, parentPath.length() - ".dir".length());
+            }
+            repositoryPath = PlatformNameFormat.getRepositoryPath(parentPath);
+        } else {
+            // TODO - we assume here that it's a full coverage aggregate but it might not be
+            if (osPath.endsWith(EXTENSION_XML)) {
+                repositoryPath = PlatformNameFormat.getRepositoryPath(osPath.substring(0, osPath.length()
+                        - EXTENSION_XML.length()));
+            } else {
+                repositoryPath = PlatformNameFormat.getRepositoryPath(osPath).replace(".dir/", "/");
+            }
+        }
+
+        // TODO extract into PathUtils
+        if (repositoryPath.length() > 0 && repositoryPath.charAt(0) != '/') {
+            repositoryPath = '/' + repositoryPath;
+        } else if (repositoryPath.length() == 0) {
+            repositoryPath = "/";
+        }
+
+        return repositoryPath;
+    }
+
+    @Override
+    public String getOsPath(String repositoryPath) {
+        return PlatformNameFormat.getPlatformPath(repositoryPath);
+    }
+
     protected void bindVaultFsLocator(VaultFsLocator fsLocator) {
 
-        getBuilder().fsLocator = fsLocator;
+        getBuilder().setLocator(fsLocator);
     }
 
     protected void unbindVaultFsLocator(VaultFsLocator fsLocator) {
 
-    	getBuilder().fsLocator = null;
+        getBuilder().setLocator(null);
     }
     
     private VltSerializationDataBuilder getBuilder() {
@@ -179,30 +234,7 @@ public class VltSerializationManager implements SerializationManager {
         if (source == null)
             return null;
 
-        String repositoryPath;
-        String name = Text.getName(filePath);
-        if (name.equals(Constants.DOT_CONTENT_XML)) {
-            // TODO - generalize instead of special-casing the parent name
-            String parentPath = Text.getRelativeParent(filePath, 1);
-            if (parentPath != null && parentPath.endsWith(".dir")) {
-                parentPath = parentPath.substring(0, parentPath.length() - ".dir".length());
-            }
-            repositoryPath = PlatformNameFormat.getRepositoryPath(parentPath);
-        } else {
-            if (!filePath.endsWith(EXTENSION_XML)) {
-                throw new IllegalArgumentException("Don't know how to extract resource path from file named "
-                        + filePath);
-            }
-            repositoryPath = PlatformNameFormat.getRepositoryPath(filePath.substring(0,
-                    filePath.length() - EXTENSION_XML.length()));
-        }
-
-        // TODO extract into PathUtils
-        if (repositoryPath.length() > 0 && repositoryPath.charAt(0) != '/') {
-            repositoryPath = '/' + repositoryPath;
-        } else if (repositoryPath.length() == 0) {
-            repositoryPath = "/";
-        }
+        String repositoryPath = getRepositoryPath(filePath);
 
         try {
             SAXParserFactory factory = SAXParserFactory.newInstance();
@@ -213,10 +245,7 @@ public class VltSerializationManager implements SerializationManager {
             parser.parse(source, handler);
 
             return handler.getRoot();
-        } catch (SAXException e) {
-            // TODO proper error handling
-            throw new IOException(e);
-        } catch (ParserConfigurationException e) {
+        } catch (SAXException | ParserConfigurationException e) {
             // TODO proper error handling
             throw new IOException(e);
         }

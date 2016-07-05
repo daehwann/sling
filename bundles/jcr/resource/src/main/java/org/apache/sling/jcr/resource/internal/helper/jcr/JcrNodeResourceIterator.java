@@ -21,11 +21,14 @@ package org.apache.sling.jcr.resource.internal.helper.jcr;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import javax.jcr.ItemNotFoundException;
+import javax.jcr.Node;
 import javax.jcr.NodeIterator;
+import javax.jcr.RepositoryException;
 
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.api.resource.path.PathSet;
+import org.apache.sling.jcr.resource.internal.HelperData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,33 +44,55 @@ public class JcrNodeResourceIterator implements Iterator<Resource> {
     private static final Logger LOGGER = LoggerFactory.getLogger(JcrNodeResourceIterator.class);
 
     /** resource resolver used to create resources from nodes */
-    private ResourceResolver resourceResolver;
+    private final ResourceResolver resourceResolver;
 
     /** underlying node iterator to be used for resources */
-    private NodeIterator nodes;
+    private final NodeIterator nodes;
 
     /** The prefetched next iterator entry, null at the end of iterating */
     private Resource nextResult;
 
-    private final ClassLoader dynamicClassLoader;
+    private final HelperData helper;
+
+    private final String parentPath;
+
+    private final String parentVersion;
+
+    private final PathSet excludedPaths;
 
     /**
      * Creates an instance using the given resource manager and the nodes
-     * provided as a node iterator.
+     * provided as a node iterator. Paths of the iterated resources will be
+     * concatenated from the parent path, node name and the version number.
+     *
+     * @param resourceResolver the resolver
+     * @param parentPath the parent path
+     * @param parentVersion the parent version
+     * @param nodes the node iterator
+     * @param helper the helper
+     * @param excludedPaths the set of excluded paths
      */
     public JcrNodeResourceIterator(final ResourceResolver resourceResolver,
+                                   final String parentPath,
+                                   final String parentVersion,
                                    final NodeIterator nodes,
-                                   final ClassLoader dynamicClassLoader) {
+                                   final HelperData helper,
+                                   final PathSet excludedPaths) {
         this.resourceResolver = resourceResolver;
+        this.parentPath = parentPath;
+        this.parentVersion = parentVersion;
         this.nodes = nodes;
-        this.dynamicClassLoader = dynamicClassLoader;
+        this.helper = helper;
+        this.excludedPaths = excludedPaths == null ? PathSet.EMPTY_SET : excludedPaths;
         this.nextResult = seek();
     }
 
+    @Override
     public boolean hasNext() {
         return nextResult != null;
     }
 
+    @Override
     public Resource next() {
         if (!hasNext()) {
             throw new NoSuchElementException();
@@ -82,6 +107,7 @@ public class JcrNodeResourceIterator implements Iterator<Resource> {
      * Throws <code>UnsupportedOperationException</code> as this method is not
      * supported by this implementation.
      */
+    @Override
     public void remove() {
         throw new UnsupportedOperationException();
     }
@@ -89,14 +115,14 @@ public class JcrNodeResourceIterator implements Iterator<Resource> {
     private Resource seek() {
         while (nodes.hasNext()) {
             try {
-                Resource resource = new JcrNodeResource(resourceResolver,
-                    nodes.nextNode(), dynamicClassLoader);
-                LOGGER.debug("seek: Returning Resource {}", resource);
-                return resource;
-            } catch (final ItemNotFoundException infe) {
-                LOGGER.debug(
-                                "seek: Problem creating Resource for next node, skipping",
-                                infe);
+                final Node n = nodes.nextNode();
+                final String path = getPath(n);
+                if ( path != null && this.excludedPaths.matches(path) == null ) {
+                    final Resource resource = new JcrNodeResource(resourceResolver,
+                        path, parentVersion, n, helper);
+                    LOGGER.debug("seek: Returning Resource {}", resource);
+                    return resource;
+                }
             } catch (final Throwable t) {
                 LOGGER.error(
                     "seek: Problem creating Resource for next node, skipping",
@@ -107,5 +133,15 @@ public class JcrNodeResourceIterator implements Iterator<Resource> {
         // no more results
         LOGGER.debug("seek: No more nodes, iterator exhausted");
         return null;
+    }
+
+    private String getPath(final Node node) throws RepositoryException {
+        final String path;
+        if (parentPath == null) {
+            path = node.getPath();
+        } else {
+            path = "/".equals(parentPath) ? '/' + node.getName() : parentPath + '/' + node.getName();
+        }
+        return helper.pathMapper.mapJCRPathToResourcePath(path);
     }
 }

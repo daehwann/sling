@@ -23,6 +23,8 @@ import static org.apache.sling.api.SlingConstants.SLING_CURRENT_SERVLET_NAME;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.util.ArrayList;
 
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
@@ -47,13 +49,15 @@ import org.apache.sling.api.servlets.ServletResolver;
 import org.apache.sling.api.wrappers.SlingHttpServletRequestWrapper;
 import org.apache.sling.api.wrappers.SlingHttpServletResponseWrapper;
 import org.apache.sling.engine.impl.SlingHttpServletRequestImpl;
-import org.apache.sling.engine.impl.SlingHttpServletRequestImpl3;
 import org.apache.sling.engine.impl.SlingHttpServletResponseImpl;
 import org.apache.sling.engine.impl.SlingMainServlet;
 import org.apache.sling.engine.impl.SlingRequestProcessorImpl;
+import org.apache.sling.engine.impl.StaticResponseHeader;
 import org.apache.sling.engine.impl.adapter.SlingServletRequestAdapter;
 import org.apache.sling.engine.impl.adapter.SlingServletResponseAdapter;
 import org.apache.sling.engine.impl.parameters.ParameterSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The <code>RequestData</code> class provides access to objects which are set
@@ -69,6 +73,9 @@ import org.apache.sling.engine.impl.parameters.ParameterSupport;
  * @see ContentData
  */
 public class RequestData {
+
+    /** default log */
+    private final Logger log = LoggerFactory.getLogger(RequestData.class);
 
     /**
      * The default value for the number of recursive inclusions for a single
@@ -105,9 +112,16 @@ public class RequestData {
      */
     private static int maxCallCounter = DEFAULT_MAX_CALL_COUNTER;
 
+    /**
+     * The name of the request attribute to override the max call number (-1 for infinite or integer value).
+     */
+    private static String REQUEST_MAX_CALL_OVERRIDE = SlingMainServlet.PROP_MAX_CALL_COUNTER;
+
     private static SlingMainServlet SLING_MAIN_SERVLET;
 
     private static SlingHttpServletRequestFactory REQUEST_FACTORY;
+
+    private static ArrayList<StaticResponseHeader> ADDITIONAL_RESPONSE_HEADERS;
 
     /** The SlingMainServlet used for request dispatching and other stuff */
     private final SlingRequestProcessorImpl slingRequestProcessor;
@@ -181,6 +195,14 @@ public class RequestData {
         RequestData.REQUEST_FACTORY = null;
     }
 
+    public static void setAdditionalResponseHeaders(ArrayList<StaticResponseHeader> mappings){
+        RequestData.ADDITIONAL_RESPONSE_HEADERS = mappings;
+    }
+
+    public static ArrayList<StaticResponseHeader> getAdditionalResponseHeaders() {
+        return ADDITIONAL_RESPONSE_HEADERS;
+    }
+
     public RequestData(SlingRequestProcessorImpl slingRequestProcessor,
             HttpServletRequest request, HttpServletResponse response) {
         this.startTimestamp = System.currentTimeMillis();
@@ -194,11 +216,17 @@ public class RequestData {
         this.slingResponse = new SlingHttpServletResponseImpl(this,
             servletResponse);
 
-        this.requestProgressTracker = new SlingRequestProgressTracker();
-        this.requestProgressTracker.log(
-        		"Method={0}, PathInfo={1}",
-        		this.slingRequest.getMethod(), this.slingRequest.getPathInfo()
-        );
+        // Getting the RequestProgressTracker from the request attributes like
+        // this should not be generally used, it's just a way to pass it from
+        // its creation point to here, so it's made available via 
+        // the Sling request's getRequestProgressTracker method.
+        final Object o = request.getAttribute(RequestProgressTracker.class.getName());
+        if(o instanceof SlingRequestProgressTracker) {
+            this.requestProgressTracker = (SlingRequestProgressTracker)o;
+        } else {
+            log.warn("SlingRequestProgressTracker not found in request attributes");
+            this.requestProgressTracker = new SlingRequestProgressTracker(request);
+        }
     }
 
     public Resource initResource(ResourceResolver resourceResolver) {
@@ -208,7 +236,20 @@ public class RequestData {
         // resolve the resource
         requestProgressTracker.startTimer("ResourceResolution");
         final SlingHttpServletRequest request = getSlingRequest();
-        Resource resource = resourceResolver.resolve(request, request.getPathInfo());
+
+        StringBuffer requestURL = servletRequest.getRequestURL();
+        String path = request.getPathInfo();
+        if (requestURL.indexOf(";") > -1 && !path.contains(";")) {
+            final String decodedURL;
+            try {
+                decodedURL = URLDecoder.decode(requestURL.toString(), "UTF-8");
+            } catch (UnsupportedEncodingException e) {
+                throw new AssertionError("UTF-8 encoding is not supported");
+            }
+            path = path.concat(decodedURL.substring(decodedURL.indexOf(';')));
+        }
+
+        Resource resource = resourceResolver.resolve(request, path);
         if (request.getAttribute(REQUEST_RESOURCE_PATH_ATTR) == null) {
             request.setAttribute(REQUEST_RESOURCE_PATH_ATTR, resource.getPath());
         }
@@ -491,7 +532,7 @@ public class RequestData {
             String name = RequestUtil.getServletName(servlet);
 
             // verify the number of service calls in this request
-            if (requestData.servletCallCounter >= maxCallCounter) {
+            if (requestData.hasServletMaxCallCount(request)) {
                 throw new TooManyCallsException(name);
             }
 
@@ -560,6 +601,32 @@ public class RequestData {
 
     public int getServletCallCount() {
         return servletCallCounter;
+    }
+
+    /**
+     * Returns {@code true} if the number of {@code RequestDispatcher.include}
+     * calls has been reached within the given request. That maximum number may
+     * either be defined by the {@link #REQUEST_MAX_CALL_OVERRIDE} request
+     * attribute or the {@link SlingMainServlet#PROP_MAX_CALL_COUNTER}
+     * configuration of the {@link SlingMainServlet}.
+     *
+     * @param request The request to check
+     * @return {@code true} if the maximum number of calls has been reached (or
+     *         surpassed)
+     */
+    private boolean hasServletMaxCallCount(final ServletRequest request) {
+        // verify the number of service calls in this request
+        log.debug("Servlet call counter : {}", getServletCallCount());
+
+        // max number of calls can be overriden with a request attribute (-1 for
+        // infinite or integer value)
+        int maxCallCounter = RequestData.getMaxCallCounter();
+        Object reqMaxOverride = request.getAttribute(REQUEST_MAX_CALL_OVERRIDE);
+        if (reqMaxOverride instanceof Number) {
+            maxCallCounter = ((Number) reqMaxOverride).intValue();
+        }
+
+        return (maxCallCounter >= 0) && getServletCallCount() >= maxCallCounter;
     }
 
     public long getElapsedTimeMsec() {
@@ -633,22 +700,12 @@ public class RequestData {
     private static SlingHttpServletRequestFactory getSlingHttpServletRequestFactory() {
         SlingHttpServletRequestFactory factory = RequestData.REQUEST_FACTORY;
         if (factory == null) {
-            SlingMainServlet servlet = RequestData.SLING_MAIN_SERVLET;
-            if (servlet == null || servlet.getServletContext() == null
-                || servlet.getServletContext().getMajorVersion() < 3) {
-
-                factory = new SlingHttpServletRequestFactory() {
-                    public SlingHttpServletRequest createRequest(RequestData requestData, HttpServletRequest request) {
-                        return new SlingHttpServletRequestImpl(requestData, request);
-                    }
-                };
-            } else {
-                factory = new SlingHttpServletRequestFactory() {
-                    public SlingHttpServletRequest createRequest(RequestData requestData, HttpServletRequest request) {
-                        return new SlingHttpServletRequestImpl3(requestData, request);
-                    }
-                };
-            }
+            factory = new SlingHttpServletRequestFactory() {
+                @Override
+                public SlingHttpServletRequest createRequest(RequestData requestData, HttpServletRequest request) {
+                    return new SlingHttpServletRequestImpl(requestData, request);
+                }
+            };
             RequestData.REQUEST_FACTORY = factory;
         }
         return factory;

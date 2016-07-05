@@ -27,7 +27,6 @@ import java.io.PrintWriter;
 import java.io.Writer;
 import java.security.AccessControlException;
 
-import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
@@ -49,10 +48,12 @@ import org.apache.sling.api.servlets.ServletResolver;
 import org.apache.sling.api.wrappers.SlingHttpServletResponseWrapper;
 import org.apache.sling.engine.SlingRequestProcessor;
 import org.apache.sling.engine.impl.filter.AbstractSlingFilterChain;
+import org.apache.sling.engine.impl.filter.FilterHandle;
 import org.apache.sling.engine.impl.filter.RequestSlingFilterChain;
 import org.apache.sling.engine.impl.filter.ServletFilterManager;
 import org.apache.sling.engine.impl.filter.ServletFilterManager.FilterChainType;
 import org.apache.sling.engine.impl.filter.SlingComponentFilterChain;
+import org.apache.sling.engine.impl.parameters.ParameterSupport;
 import org.apache.sling.engine.impl.request.ContentData;
 import org.apache.sling.engine.impl.request.RequestData;
 import org.apache.sling.engine.impl.request.RequestHistoryConsolePlugin;
@@ -67,9 +68,7 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
 
     // used fields ....
 
-    private final DefaultErrorHandler defaultErrorHandler = new DefaultErrorHandler();
-
-    private ErrorHandler errorHandler = defaultErrorHandler;
+    private final DefaultErrorHandler errorHandler = new DefaultErrorHandler();
 
     private ServletResolver servletResolver;
 
@@ -80,16 +79,16 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
     // ---------- helper setters
 
     void setServerInfo(final String serverInfo) {
-        defaultErrorHandler.setServerInfo(serverInfo);
+        errorHandler.setServerInfo(serverInfo);
     }
 
-    void setErrorHandler(final ErrorHandler errorHandler) {
-        this.errorHandler = errorHandler;
+    void setErrorHandler(final ErrorHandler eh) {
+        errorHandler.setDelegate(eh);
     }
 
-    void unsetErrorHandler(final ErrorHandler errorHandler) {
-        if (this.errorHandler == errorHandler) {
-            this.errorHandler = defaultErrorHandler;
+    void unsetErrorHandler(final ErrorHandler eh) {
+        if (errorHandler.getDelegate() == eh) {
+            errorHandler.setDelegate(null);
         }
     }
 
@@ -111,9 +110,10 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
         this.mbean = mbean;
     }
 
-    // ---------- SlingRequestProcessor interface
-
-    public void processRequest(final HttpServletRequest servletRequest,
+    /**
+     * This method is directly called by the Sling main servlet.
+     */
+    public void doProcessRequest(final HttpServletRequest servletRequest,
             final HttpServletResponse servletResponse,
             final ResourceResolver resourceResolver) throws IOException {
 
@@ -140,7 +140,7 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
             Resource resource = requestData.initResource(resourceResolver);
             requestData.initServlet(resource, sr);
 
-            Filter[] filters = filterManager.getFilters(FilterChainType.REQUEST);
+            FilterHandle[] filters = filterManager.getFilters(FilterChainType.REQUEST);
             if (filters != null) {
                 FilterChain processor = new RequestSlingFilterChain(this,
                     filters);
@@ -232,6 +232,29 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
         }
     }
 
+    // ---------- SlingRequestProcessor interface
+
+    /**
+     * @see org.apache.sling.engine.SlingRequestProcessor#processRequest(javax.servlet.http.HttpServletRequest, javax.servlet.http.HttpServletResponse, org.apache.sling.api.resource.ResourceResolver)
+     */
+    public void processRequest(final HttpServletRequest servletRequest,
+            final HttpServletResponse servletResponse,
+            final ResourceResolver resourceResolver) throws IOException {
+        // set the marker for the parameter support
+        final Object oldValue = servletRequest.getAttribute(ParameterSupport.MARKER_IS_SERVICE_PROCESSING);
+        servletRequest.setAttribute(ParameterSupport.MARKER_IS_SERVICE_PROCESSING, Boolean.TRUE);
+        try {
+            this.doProcessRequest(servletRequest, servletResponse, resourceResolver);
+        } finally {
+            // restore the old value
+            if ( oldValue != null ) {
+                servletRequest.setAttribute(ParameterSupport.MARKER_IS_SERVICE_PROCESSING, oldValue);
+            } else {
+                servletRequest.removeAttribute(ParameterSupport.MARKER_IS_SERVICE_PROCESSING);
+            }
+        }
+    }
+
     /**
      * Renders the component defined by the RequestData's current ComponentData
      * instance after calling all filters of the given
@@ -250,7 +273,7 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
             final FilterChainType filterChainType) throws IOException,
             ServletException {
 
-        Filter filters[] = filterManager.getFilters(filterChainType);
+        FilterHandle filters[] = filterManager.getFilters(filterChainType);
         if (filters != null) {
 
             FilterChain processor = new SlingComponentFilterChain(filters);
@@ -312,7 +335,7 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
         // the response output stream if reset does not reset this
         response = new ErrorResponseWrapper(response);
 
-        Filter[] filters = filterManager.getFilters(FilterChainType.ERROR);
+        FilterHandle[] filters = filterManager.getFilters(FilterChainType.ERROR);
         if (filters != null && filters.length > 0) {
             FilterChain processor = new AbstractSlingFilterChain(filters) {
 
@@ -344,7 +367,7 @@ public class SlingRequestProcessorImpl implements SlingRequestProcessor {
         // the response output stream if reset does not reset this
         response = new ErrorResponseWrapper(response);
 
-        Filter[] filters = filterManager.getFilters(FilterChainType.ERROR);
+        FilterHandle[] filters = filterManager.getFilters(FilterChainType.ERROR);
         if (filters != null && filters.length > 0) {
             FilterChain processor = new AbstractSlingFilterChain(filters) {
 

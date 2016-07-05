@@ -22,12 +22,12 @@
     <parent>
         <groupId>org.apache.sling</groupId>
         <artifactId>sling</artifactId>
-        <version>18</version>
-        <relativePath>../../../parent/pom.xml</relativePath>
+        <version>26</version>
+        <relativePath/>
     </parent>
 
     <artifactId>org.apache.sling.tenant</artifactId>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.3-SNAPSHOT</version>
     <packaging>bundle</packaging>
 
     <name>Apache Sling Tenant</name>
@@ -126,6 +126,16 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-all</artifactId>
+            <version>1.10.19</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
         </dependency>
     </dependencies>
 </project>

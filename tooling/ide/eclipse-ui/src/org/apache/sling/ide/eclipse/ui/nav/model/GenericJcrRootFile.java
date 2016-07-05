@@ -24,7 +24,8 @@ import java.util.List;
 
 import javax.xml.parsers.ParserConfigurationException;
 
-import org.apache.commons.io.IOUtils;
+import org.apache.sling.ide.eclipse.core.internal.Activator;
+import org.apache.sling.ide.serialization.SerializationManager;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.CoreException;
@@ -33,10 +34,6 @@ import org.xml.sax.SAXException;
 
 import de.pdark.decentxml.Document;
 import de.pdark.decentxml.Element;
-import de.pdark.decentxml.XMLParser;
-import de.pdark.decentxml.XMLSource;
-import de.pdark.decentxml.XMLStringSource;
-import de.pdark.decentxml.XMLTokenizer;
 import de.pdark.decentxml.XMLTokenizer.Type;
 
 /** WIP: model object for a [.content.xml] shown in the content package view in project explorer **/
@@ -57,18 +54,10 @@ public class GenericJcrRootFile extends JcrNode {
 		this.parent = parent;
 		this.domElement = null;
 		
-		XMLParser parser = new XMLParser () {
-			@Override
-			protected XMLTokenizer createTokenizer(XMLSource source) {
-				XMLTokenizer tolerantTokenizerIgnoringEntities = new TolerantXMLTokenizer(source, file);
-				tolerantTokenizerIgnoringEntities.setTreatEntitiesAsText (this.isTreatEntitiesAsText());
-		        return tolerantTokenizerIgnoringEntities;
-			}
-		};
-		InputStream in = file.getContents();
-		String xml = IOUtils.toString(in);
-		this.document = parser.parse (new XMLStringSource (xml));	
-		handleJcrRoot(this.document.getRootElement());
+        try (InputStream in = file.getContents()) {
+            this.document = TolerantXMLParser.parse(in, file.getFullPath().toOSString());
+            handleJcrRoot(this.document.getRootElement());
+        }
 	}
 	
 	@Override
@@ -91,11 +80,14 @@ public class GenericJcrRootFile extends JcrNode {
 		if (isRootContentXml()) {
 			if (parent instanceof DirNode) {
 				DirNode dirNodeParent = (DirNode)parent;
-				JcrNode dirNodeParentParent = dirNodeParent.getParent();
 				JcrNode effectiveSibling = dirNodeParent.getEffectiveSibling();
-				handleProperties(element, effectiveSibling.properties);
+				if (effectiveSibling!=null) {
+				    effectiveSibling.dirSibling = dirNodeParent;
+				    handleProperties(element, effectiveSibling.properties);
+				} else {
+				    handleProperties(element, parent.properties);
+				}
 				effectiveParent = parent;
-				dirNodeParentParent.hide(parent);
 			} else {
 				handleProperties(element, parent.properties);
 				effectiveParent = parent;
@@ -157,26 +149,27 @@ public class GenericJcrRootFile extends JcrNode {
 		}
 		JcrNode childJcrNode = new JcrNode(parent, domNode, this, null);
 		handleProperties(domNode, childJcrNode.properties);
-		List<Element> children = domNode.getChildren();
-		for (Iterator<Element> it = children.iterator(); it.hasNext();) {
-			Element element = it.next();
+		for (Element element : domNode.getChildren()) {
 			handleChild(childJcrNode, element);
 		}
 	}
 
-	public void pickResources(List<Object> membersList) {
-		for (Iterator<Object> it = membersList.iterator(); it.hasNext();) {
-			final IResource resource = (IResource) it.next();
+    public void pickResources(List<IResource> membersList) {
+        
+        final SerializationManager serializationManager = Activator.getDefault().getSerializationManager();
+
+        for (Iterator<IResource> it = membersList.iterator(); it.hasNext();) {
+            final IResource resource = it.next();
 			final String resName = resource.getName();
-			Iterator it2;
+            Iterator<JcrNode> it2;
 			if (isRootContentXml()) {
 				it2 = parent.children.iterator();
 			} else {
 				it2 = children.iterator();
 			}
 			while(it2.hasNext()) {
-				JcrNode aChild = (JcrNode) it2.next();
-				if (resName.equals(aChild.getName())) {
+                JcrNode aChild = it2.next();
+				if (resName.equals(serializationManager.getOsPath(aChild.getName()))) {
 					// then pick this one
 					it.remove();
 					aChild.setResource(resource);
@@ -193,8 +186,8 @@ public class GenericJcrRootFile extends JcrNode {
 	}
 	
 	@Override
-	public void createChild(String nodeName) {
-		createChild(nodeName, document.getRootElement());
+	void createDomChild(String childNodeName, String childNodeType) {
+        createChild(childNodeName, childNodeType, document.getRootElement(), underlying);
 	}
 	
 	public void save() {
@@ -205,7 +198,36 @@ public class GenericJcrRootFile extends JcrNode {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
- 
+		
+		SyncDirManager.syncDirChanged(getSyncDir());
+	}
+	
+	@Override
+	public boolean canBeRenamed() {
+	    return true;
+	}
+	
+	@Override
+	public boolean canBeDeleted() {
+	    return true;
+	}
+	
+	@Override
+	public void rename(String string) {
+        try {
+            file.move(file.getParent().getFullPath().append(string+".xml"), true, new NullProgressMonitor());
+        } catch (CoreException e) {
+            Activator.getDefault().getPluginLogger().error("Error renaming resource ("+file+"): "+e, e);
+        }
+	}
+	
+	@Override
+	public void delete() {
+        try {
+            file.delete(true, new NullProgressMonitor());
+        } catch (CoreException e) {
+            Activator.getDefault().getPluginLogger().error("Error deleting resource ("+file+"): "+e, e);
+        }
 	}
 	
 }

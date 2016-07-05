@@ -25,6 +25,9 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+
 import org.apache.sling.api.wrappers.ValueMapDecorator;
 
 /**
@@ -38,10 +41,13 @@ public class ResourceUtil {
 
     /**
      * Resolves relative path segments '.' and '..' in the absolute path.
-     * Returns null if not possible (.. points above root) or if path is not
+     * Returns {@code null} if not possible (.. points above root) or if path is not
      * absolute.
+     *
+     * @param path The path to normalize
+     * @return The normalized path or {@code null}.
      */
-    public static String normalize(String path) {
+    public static @CheckForNull String normalize(@Nonnull String path) {
 
         // don't care for empty paths
         if (path.length() == 0) {
@@ -125,7 +131,7 @@ public class ResourceUtil {
      *             {@link #normalize(String)} method.
      * @throws NullPointerException If <code>path</code> is <code>null</code>.
      */
-    public static String getParent(String path) {
+    public static @CheckForNull String getParent(@Nonnull String path) {
         if ("/".equals(path)) {
             return null;
         }
@@ -182,9 +188,9 @@ public class ResourceUtil {
      * @return <code>null</code> if <code>path</code> doesn't have an ancestor at the
      *            specified <code>level</code>.
      * @throws IllegalArgumentException If the path cannot be normalized by the
-     *             {@link #normalize(String)} method or if <code>level</code> < 0.
+     *             {@link #normalize(String)} method or if <code>level</code> &lt; 0.
      * @throws NullPointerException If <code>path</code> is <code>null</code>.
-     * @since 2.2
+     * @since 2.2 (Sling API Bundle 2.2.0)
      */
     public static String getParent(final String path, final int level) {
         if ( level < 0 ) {
@@ -203,23 +209,30 @@ public class ResourceUtil {
     /**
      * Utility method returns the parent resource of the resource.
      *
-     * @throws NullPointerException If <code>rsrc</code> is <code>null</code>.
+     * @param rsrc The resource to get the parent of.
      * @return The parent resource or null if the rsrc is the root.
+     * @throws NullPointerException If <code>rsrc</code> is <code>null</code>.
+     * @throws org.apache.sling.api.SlingException If an error occurs trying to
+     *             get the resource object from the path.
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
      * @deprecated since 2.1.0, use {@link Resource#getParent()} instead
      */
     @Deprecated
-    public static Resource getParent(Resource rsrc) {
+    public static @CheckForNull Resource getParent(@Nonnull Resource rsrc) {
         return rsrc.getParent();
     }
 
     /**
      * Utility method returns the name of the resource.
      *
+     * @param rsrc The resource to get the name from.
+     * @return The name of the resource
      * @throws NullPointerException If <code>rsrc</code> is <code>null</code>.
      * @deprecated since 2.1.0, use {@link Resource#getName()} instead
      */
     @Deprecated
-    public static String getName(Resource rsrc) {
+    public static @Nonnull String getName(@Nonnull Resource rsrc) {
         /*
          * Same as AbstractResource.getName() implementation to prevent problems
          * if there are implementations of the pre-2.1.0 Resource interface in
@@ -241,7 +254,7 @@ public class ResourceUtil {
      *             {@link #normalize(String)} method.
      * @throws NullPointerException If <code>path</code> is <code>null</code>.
      */
-    public static String getName(String path) {
+    public static @Nonnull String getName(@Nonnull String path) {
         if ("/".equals(path)) {
             return "";
         }
@@ -270,7 +283,7 @@ public class ResourceUtil {
      *         <code>null</code> or not an instance of the
      *         <code>org.apache.sling.resource.SyntheticResource</code> class.
      */
-    public static boolean isSyntheticResource(Resource res) {
+    public static boolean isSyntheticResource(@Nonnull Resource res) {
         if (res instanceof SyntheticResource) {
             return true;
         }
@@ -304,7 +317,7 @@ public class ResourceUtil {
      *         resource.
      * @throws NullPointerException if <code>res</code> is <code>null</code>.
      */
-    public static boolean isStarResource(Resource res) {
+    public static boolean isStarResource(@Nonnull Resource res) {
         return res.getPath().endsWith("/*");
     }
 
@@ -322,7 +335,7 @@ public class ResourceUtil {
      *         non-existing resource.
      * @throws NullPointerException if <code>res</code> is <code>null</code>.
      */
-    public static boolean isNonExistingResource(Resource res) {
+    public static boolean isNonExistingResource(@Nonnull Resource res) {
         return Resource.RESOURCE_TYPE_NON_EXISTING.equals(res.getResourceType());
     }
 
@@ -336,13 +349,15 @@ public class ResourceUtil {
      * @param parent The {@link Resource Resource} whose children are requested.
      * @return An <code>Iterator</code> of {@link Resource} objects.
      * @throws NullPointerException If <code>parent</code> is <code>null</code>.
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
      * @throws org.apache.sling.api.SlingException If any error occurs acquiring
      *             the child resource iterator.
      * @see ResourceResolver#listChildren(Resource)
      * @deprecated since 2.1.0, use {@link Resource#listChildren()} instead
      */
     @Deprecated
-    public static Iterator<Resource> listChildren(Resource parent) {
+    public static @Nonnull Iterator<Resource> listChildren(@Nonnull Resource parent) {
         /*
          * Same as AbstractResource.listChildren() implementation to prevent
          * problems if there are implementations of the pre-2.1.0 Resource
@@ -353,38 +368,21 @@ public class ResourceUtil {
 
     /**
      * Returns an <code>ValueMap</code> object for the given
-     * <code>Resource</code>. This method calls {@link Resource#adaptTo(Class)}
-     * with the {@link ValueMap} class as an argument. If the
-     * <code>adaptTo</code> method returns a map, this map is returned. If the
-     * resource is not adaptable to a value map, next an adaption to {@link Map}
-     * is tried and if this is successful the map is wrapped as a value map. If
-     * the adaptions are not successful an empty value map is returned. If
-     * <code>null</code> is provided as the resource an empty map is returned as
+     * <code>Resource</code>. This method calls {@link Resource#getValueMap()}.
+     * If <code>null</code> is provided as the resource an empty map is returned as
      * well.
+     * <p>For backward compatibility reasons the map returned is not immutable,
+     * but it is not recommend to rely on this behavior.</p>
      *
      * @param res The <code>Resource</code> to adapt to the value map.
      * @return A value map.
      */
-    @SuppressWarnings("unchecked")
-    public static ValueMap getValueMap(final Resource res) {
-        // adapt to ValueMap if resource is not null
-        ValueMap valueMap = (res != null) ? res.adaptTo(ValueMap.class) : null;
-
-        // if no resource or no ValueMap adapter, check Map
-        if (valueMap == null) {
-
-            Map map = (res != null) ? res.adaptTo(Map.class) : null;
-
-            // if not even adapting to map, assume an empty map
-            if (map == null) {
-                map = new HashMap<String, Object>();
-            }
-
-            // .. and decorate the plain map
-            valueMap = new ValueMapDecorator(map);
+    public static @Nonnull ValueMap getValueMap(final Resource res) {
+        if ( res == null ) {
+            // use empty map
+            return new ValueMapDecorator(new HashMap<String, Object>());
         }
-
-        return valueMap;
+        return res.getValueMap();
     }
 
     /**
@@ -394,10 +392,10 @@ public class ResourceUtil {
      *
      * @param type The resource type to be converted into a path
      * @return The resource type as a path.
-     * @since 2.0.6
+     * @since 2.0.6 (Sling API Bundle 2.0.6)
      */
-    public static String resourceTypeToPath(final String type) {
-        return type.replaceAll("\\:", "/");
+    public static @Nonnull String resourceTypeToPath(@Nonnull final String type) {
+        return type.replace(':', '/');
     }
 
     /**
@@ -418,12 +416,14 @@ public class ResourceUtil {
      * @return the super type of the <code>resourceType</code> or
      *         <code>null</code> if the resource type does not exists or returns
      *         <code>null</code> for its super type.
-     * @since 2.0.6
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
+     * @since 2.0.6 (Sling API Bundle 2.0.6)
      * @deprecated Use {@link ResourceResolver#getParentResourceType(String)}
      */
     @Deprecated
-    public static String getResourceSuperType(
-            final ResourceResolver resourceResolver, final String resourceType) {
+    public static @CheckForNull String getResourceSuperType(
+            final @Nonnull ResourceResolver resourceResolver, final String resourceType) {
         return resourceResolver.getParentResourceType(resourceType);
     }
 
@@ -437,11 +437,13 @@ public class ResourceUtil {
      * @param resource The resource to return the resource super type for.
      * @return the super type of the <code>resource</code> or <code>null</code>
      *         if no super type could be computed.
-     * @since 2.0.6
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
+     * @since 2.0.6 (Sling API Bundle 2.0.6)
      * @deprecated Use {@link ResourceResolver#getParentResourceType(Resource)}
      */
     @Deprecated
-    public static String findResourceSuperType(final Resource resource) {
+    public static @CheckForNull String findResourceSuperType(@Nonnull final Resource resource) {
         if ( resource == null ) {
             return null;
         }
@@ -459,11 +461,13 @@ public class ResourceUtil {
      *         Otherwise returns the result of calling
      *         {@link Resource#isResourceType(String)} with the given
      *         <code>resourceType</code>.
-     * @since 2.0.6
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
+     * @since 2.0.6 (Sling API Bundle 2.0.6)
      * @deprecated Use {@link ResourceResolver#isResourceType(Resource, String)}
      */
     @Deprecated
-    public static boolean isA(final Resource resource, final String resourceType) {
+    public static boolean isA(@Nonnull final Resource resource, final String resourceType) {
         if ( resource == null ) {
             return false;
         }
@@ -480,18 +484,22 @@ public class ResourceUtil {
      *
      * @param iterator A resource iterator.
      * @param <T> The adapted type
-     * @since 2.0.6
+     * @param type The adapted type
+     * @return An iterator of the adapted objects
+     * @since 2.0.6 (Sling API Bundle 2.0.6)
      */
-    public static <T> Iterator<T> adaptTo(final Iterator<Resource> iterator,
+    public static @Nonnull <T> Iterator<T> adaptTo(final @Nonnull Iterator<Resource> iterator,
             final Class<T> type) {
         return new Iterator<T>() {
 
             private T nextObject = seek();
 
+            @Override
             public boolean hasNext() {
                 return nextObject != null;
             }
 
+            @Override
             public T next() {
                 if (!hasNext()) {
                     throw new NoSuchElementException();
@@ -501,6 +509,7 @@ public class ResourceUtil {
                 return object;
             }
 
+            @Override
             public void remove() {
                 throw new UnsupportedOperationException();
             }
@@ -524,11 +533,17 @@ public class ResourceUtil {
      * @param resourceType The optional resource type of the final resource to create
      * @param intermediateResourceType THe optional resource type of all intermediate resources
      * @param autoCommit If set to true, a commit is performed after each resource creation.
-     * @since 2.3.0
+     * @return The resource for the path.
+     * @throws org.apache.sling.api.SlingException If an error occurs trying to
+     *             get/create the resource object from the path.
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
+     * @throws PersistenceException If a persistence error occurs.
+     * @since 2.3.0  (Sling API Bundle 2.4.0)
      */
-    public static Resource getOrCreateResource(
-                            final ResourceResolver resolver,
-                            final String path,
+    public static @Nonnull Resource getOrCreateResource(
+                            final @Nonnull ResourceResolver resolver,
+                            final @Nonnull String path,
                             final String resourceType,
                             final String intermediateResourceType,
                             final boolean autoCommit)
@@ -544,15 +559,68 @@ public class ResourceUtil {
 
     /**
      * Creates or gets the resource at the given path.
+     * If an exception occurs, it retries the operation up to five times if autoCommit is enabled.
+     * In this case, {@link ResourceResolver#revert()} is called on the resolver before the
+     * creation is retried.
      *
      * @param resolver The resource resolver to use for creation
      * @param path     The full path to be created
      * @param resourceProperties The optional resource properties of the final resource to create
      * @param intermediateResourceType THe optional resource type of all intermediate resources
      * @param autoCommit If set to true, a commit is performed after each resource creation.
-     * @since 2.3.0
+     * @return The resource for the path.
+     * @throws org.apache.sling.api.SlingException If an error occurs trying to
+     *             get/create the resource object from the path.
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
+     * @throws PersistenceException If a persistence error occurs.
+     * @since 2.3.0  (Sling API Bundle 2.4.0)
      */
-    public static Resource getOrCreateResource(
+    public static @Nonnull Resource getOrCreateResource(
+            final @Nonnull ResourceResolver resolver,
+            final @Nonnull String path,
+            final Map<String, Object> resourceProperties,
+            final String intermediateResourceType,
+            final boolean autoCommit)
+    throws PersistenceException {
+        PersistenceException mostRecentPE = null;
+        for(int i=0;i<5;i++) {
+            try {
+                return ResourceUtil.getOrCreateResourceInternal(resolver,
+                        path,
+                        resourceProperties,
+                        intermediateResourceType,
+                        autoCommit);
+            } catch ( final PersistenceException pe ) {
+                if ( autoCommit ) {
+                    // in case of exception, revert to last clean state and retry
+                    resolver.revert();
+                    resolver.refresh();
+                    mostRecentPE = pe;
+                } else {
+                    throw pe;
+                }
+            }
+        }
+        throw mostRecentPE;
+    }
+
+    /**
+     * Creates or gets the resource at the given path.
+     *
+     * @param resolver The resource resolver to use for creation
+     * @param path     The full path to be created
+     * @param resourceProperties The optional resource properties of the final resource to create
+     * @param intermediateResourceType THe optional resource type of all intermediate resources
+     * @param autoCommit If set to true, a commit is performed after each resource creation.
+     * @return The resource for the path.
+     * @throws org.apache.sling.api.SlingException If an error occurs trying to
+     *             get/create the resource object from the path.
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
+     * @throws PersistenceException If a persistence error occurs.
+     */
+    private static Resource getOrCreateResourceInternal(
             final ResourceResolver resolver,
             final String path,
             final Map<String, Object> resourceProperties,
@@ -579,7 +647,20 @@ public class ResourceUtil {
                 resolver.refresh();
             }
             try {
-                rsrc = resolver.create(parentResource, name, resourceProperties);
+                int retry = 5;
+                while ( retry > 0 && rsrc == null ) {
+                    rsrc = resolver.create(parentResource, name, resourceProperties);
+                    // check for SNS
+                    if ( !name.equals(rsrc.getName()) ) {
+                        resolver.refresh();
+                        resolver.delete(rsrc);
+                        rsrc = resolver.getResource(parentResource, name);
+                    }
+                    retry--;
+                }
+                if ( rsrc == null ) {
+                    throw new PersistenceException("Unable to create resource.");
+                }
             } catch ( final PersistenceException pe ) {
                 // this could be thrown because someone else tried to create this
                 // node concurrently
@@ -619,9 +700,11 @@ public class ResourceUtil {
      * @param name   The name of the child resource
      * @return a unique non-existing name for child resource for a given <code>parent</code>
      *
-     * @throws {@link PersistenceException} if it can not find unique name for child resource.
-     * @throws {@link NullPointerException} if <code>parent</code> is null
-     * @since 2.5.0
+     * @throws PersistenceException if it can not find unique name for child resource.
+     * @throws NullPointerException if <code>parent</code> is null
+     * @throws IllegalStateException if the resource resolver has already been
+     *             closed}.
+     * @since 2.5 (Sling API Bundle 2.7.0)
      */
     public static String createUniqueChildName(final Resource parent, final String name)
     throws PersistenceException {
@@ -643,5 +726,68 @@ public class ResourceUtil {
             return childNodeName;
         }
         return name;
+    }
+
+    /**
+     * Unwrap the resource and return the wrapped implementation.
+     * @param rsrc The resource to unwrap
+     * @return The unwrapped resource
+     * @since 2.5  (Sling API Bundle 2.7.0)
+     */
+    public static @Nonnull Resource unwrap(final @Nonnull Resource rsrc) {
+        Resource result = rsrc;
+        while ( result instanceof ResourceWrapper ) {
+            result = ((ResourceWrapper)result).getResource();
+        }
+        return result;
+    }
+
+    /**
+     * A batch resource remover deletes resources in batches. Once the batch
+     * size (threshold) is reached, an intermediate commit is performed. Resource
+     * trees are deleted resource by resource starting with the deepest children first.
+     * Once all resources have been passed to the batch resource remover, a final
+     * commit needs to be called on the resource resolver.
+     * @since 2.6  (Sling API Bundle 2.8.0)
+     */
+    public static class BatchResourceRemover {
+
+        private final int max;
+
+        private int count;
+
+        public BatchResourceRemover(final int batchSize) {
+            this.max = (batchSize < 1 ? 50 : batchSize);
+        }
+
+        public void delete(@Nonnull final Resource rsrc)
+        throws PersistenceException {
+            final ResourceResolver resolver = rsrc.getResourceResolver();
+            for(final Resource child : rsrc.getChildren()) {
+                delete(child);
+            }
+            resolver.delete(rsrc);
+            count++;
+            if ( count >= max ) {
+                resolver.commit();
+                count = 0;
+            }
+        }
+    }
+
+    /**
+     * Create a batch resource remover.
+     * A batch resource remove can be used to delete resources in batches.
+     * Once the passed in threshold of deleted resources is reached, an intermediate
+     * commit is called on the resource resolver. In addition the batch remover
+     * deletes a resource recursively.
+     * Once all resources to delete are passed to the remover, a final commit needs
+     * to be call on the resource resolver.
+     * @param threshold The threshold for the intermediate saves.
+     * @return A new batch resource remover.
+     * Since 2.6
+     */
+    public static @Nonnull BatchResourceRemover getBatchResourceRemover(final int threshold) {
+        return new BatchResourceRemover(threshold);
     }
 }

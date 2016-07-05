@@ -94,6 +94,44 @@ public interface AuthenticationHandler {
     static final String FAILURE_REASON = "j_reason";
 
     /**
+     * Name of the request attribute which may be set by the
+     * {@link #extractCredentials(HttpServletRequest, HttpServletResponse)}
+     * method if {@link AuthenticationInfo#FAIL_AUTH} is returned.
+     * <p>
+     * This result may be used by authentication handlers to inform the user of
+     * more detailed failure reasons, e.g. "password_expired".
+     *
+     * @see #extractCredentials(HttpServletRequest, HttpServletResponse)
+     * @since 1.1.0
+     */
+    static final String FAILURE_REASON_CODE = "j_reason_code";
+
+    /**
+     * This enum indicates the supported detailed login failure reason codes:
+     * <ul>
+     *     <li><code>invalid_login</code>: indicates username/password mismatch.</li>
+     *     <li><code>password_expired</code>: indicates password has expired or was never set and
+     *     change initial password is enabled</li>
+     *     <li><code>account_locked</code>: the account was disabled or locked</li>
+     *     <li><code>account_not_found</code>: the account was not found (not the same as username password mismatch)</li>
+     * </ul>
+     * @since 1.1.0
+     */
+    enum FAILURE_REASON_CODES {
+        INVALID_LOGIN,
+        PASSWORD_EXPIRED,
+        PASSWORD_EXPIRED_AND_NEW_PASSWORD_IN_HISTORY,
+        UNKNOWN,
+        ACCOUNT_LOCKED,
+        ACCOUNT_NOT_FOUND;
+
+        @Override
+        public String toString() {
+            return super.toString().toLowerCase();
+        }
+    }
+
+    /**
      * Extracts credential data from the request if at all contained.
      * <p>
      * The method returns any of the following values :

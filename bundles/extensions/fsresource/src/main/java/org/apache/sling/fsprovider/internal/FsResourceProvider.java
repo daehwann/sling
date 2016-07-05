@@ -63,7 +63,9 @@ import org.osgi.service.event.EventAdmin;
 @Properties({
     @Property(name="service.description", value="Sling Filesystem Resource Provider"),
     @Property(name="service.vendor", value="The Apache Software Foundation"),
-    @Property(name=ResourceProvider.ROOTS)
+    @Property(name=ResourceProvider.ROOTS),
+    @Property(name = "webconsole.configurationFactory.nameHint", 
+        value = "Root paths: {" + ResourceProvider.ROOTS + "}")
 })
 public class FsResourceProvider implements ResourceProvider {
 
@@ -97,7 +99,7 @@ public class FsResourceProvider implements ResourceProvider {
     private FileMonitor monitor;
 
     @Reference(cardinality=ReferenceCardinality.OPTIONAL_UNARY, policy=ReferencePolicy.DYNAMIC)
-    private EventAdmin eventAdmin;
+    private volatile EventAdmin eventAdmin;
 
     /**
      * Same as {@link #getResource(ResourceResolver, String)}, i.e. the

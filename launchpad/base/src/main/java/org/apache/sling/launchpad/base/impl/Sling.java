@@ -30,11 +30,9 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
-import java.util.TreeSet;
 
 import javax.management.Attribute;
 import javax.management.AttributeList;
@@ -154,6 +152,8 @@ public class Sling {
 
     public static final String PROP_SYSTEM_PACKAGES = "org.apache.sling.launcher.system.packages";
 
+    public static final String PROP_EXTRA_CAPS = "org.apache.sling.launcher.system.capabilities.extra";
+
     /**
      * Timeout to wait for the initialized framework to actually stop for it to
      * be reinitialized. This is set to a second, which should be ample time to
@@ -192,6 +192,7 @@ public class Sling {
         this.logger = logger;
         this.resourceProvider = resourceProvider;
 
+        final long startedAt = System.currentTimeMillis();
         this.logger.log(Logger.LOG_INFO, "Starting Apache Sling");
 
         // read the default parameters
@@ -199,9 +200,6 @@ public class Sling {
 
         // check for bootstrap command file
         copyBootstrapCommandFile(props);
-
-        // check for auto-start bundles
-        this.setInstallBundles(props);
 
         // create the framework and start it
         try {
@@ -222,7 +220,7 @@ public class Sling {
                 init(tmpFramework);
             }
 
-            new DefaultStartupHandler(tmpFramework.getBundleContext(), logger, startupManager);
+            new DefaultStartupHandler(tmpFramework.getBundleContext(), logger, startupManager, startedAt);
 
             // finally start
             tmpFramework.start();
@@ -653,26 +651,6 @@ public class Sling {
         }
     }
 
-    private void setInstallBundles(Map<String, String> props) {
-        String prefix = "sling.install.";
-        Set<String> levels = new TreeSet<String>();
-        for (String key : props.keySet()) {
-            if (key.startsWith(prefix)) {
-                levels.add(key.substring(prefix.length()));
-            }
-        }
-
-        StringBuffer buf = new StringBuffer();
-        for (String level : levels) {
-            if (buf.length() > 0) {
-                buf.append(',');
-            }
-            buf.append(level);
-        }
-
-        props.put(prefix + "bundles", buf.toString());
-    }
-
     // ---------- Extension support --------------------------------------------
 
     /**
@@ -707,7 +685,7 @@ public class Sling {
      * object after the system bundle of the framework has been started and
      * before it is being stopped.
      */
-    protected final BundleContext getBundleContext() {
+    public final BundleContext getBundleContext() {
         return this.framework.getBundleContext();
     }
 

@@ -1,0 +1,6 @@
+{
+    "jcr:primaryType": "sling:OsgiConfig",
+    "name": "tempvlt",
+    "type": "jcrvlt",
+    "tempFsFolder" : "/var/sling/distribution/packages"
+}

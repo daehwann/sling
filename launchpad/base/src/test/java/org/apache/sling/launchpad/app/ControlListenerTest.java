@@ -23,11 +23,16 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
-import java.util.HashMap;
-
-import junit.framework.TestCase;
+import java.util.Collections;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.sling.launchpad.base.shared.SharedConstants;
+import org.junit.Assert;
+
+import junit.framework.TestCase;
+import junitx.util.PrivateAccessor;
 
 public class ControlListenerTest extends TestCase {
 
@@ -63,10 +68,139 @@ public class ControlListenerTest extends TestCase {
 
         TestCase.assertEquals(0, new ControlListener(main, null).shutdownServer());
 
+        delay(); // wait for server to stop
+
         TestCase.assertTrue(main.stopCalled);
 
         delay();
         TestCase.assertFalse(ctlFile1.exists());
+    }
+
+    public void test_start_status_long_stop() {
+        int port = getPort();
+        MyMain2 main = new MyMain2(SLING1);
+
+        ControlListener cl = new ControlListener(main, String.valueOf(port));
+        TestCase.assertTrue(cl.listen());
+        delay(); // wait for sever to start
+
+        TestCase.assertTrue(ctlFile1.canRead());
+
+        TestCase.assertEquals(0, new ControlListener(main, null).statusServer());
+
+        TestCase.assertEquals(0, new ControlListener(main, null).shutdownServer());
+
+        delay(); // wait for server to stop
+        TestCase.assertTrue(main.stopCalled);
+
+        TestCase.assertEquals(0, new ControlListener(main, null).statusServer());
+
+        Thread t1 = new MonitorDeadlockingThread(false);
+        Thread t2 = new MonitorDeadlockingThread(true);
+        t1.start();
+        t2.start();
+
+        Thread t3 = new SynchronizerDeadlockingThread(false);
+        Thread t4 = new SynchronizerDeadlockingThread(true);
+        t3.start();
+        t4.start();
+
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException ie) {
+        }
+
+        TestCase.assertEquals(0, new ControlListener(main, null).dumpThreads());
+
+        TestCase.assertEquals(0, new ControlListener(main, null).shutdownServer());
+
+        // make sure it will shutdown now
+        t1.interrupt();
+        t2.interrupt();
+        t3.interrupt();
+        t4.interrupt();
+        main.trigger();
+
+        delay();
+        TestCase.assertFalse(ctlFile1.exists());
+    }
+
+    static class MonitorDeadlockingThread extends Thread {
+
+        private static final Object l1 = new Object();
+        private static final Object l2 = new Object();
+        private final boolean flag;
+
+        MonitorDeadlockingThread(boolean flag) {
+            this.flag = flag;
+            this.setDaemon(true);
+        }
+
+        @Override
+        public void run() {
+            if (this.flag) {
+                synchronized (l1) {
+                    try {
+                        Thread.sleep(50);
+                    } catch (InterruptedException ie) {
+                    }
+                    synchronized(l2) {
+                        System.out.println(Thread.currentThread().getName() + ": locked l2");
+                    }
+                }
+            } else {
+                synchronized(l2) {
+                    try {
+                        Thread.sleep(50);
+                    } catch (InterruptedException ie) {
+                    }
+                    synchronized (l1) {
+                        System.out.println(Thread.currentThread().getName() + ": locked l1");
+                    }
+                }
+            }
+        }
+    }
+
+    static class SynchronizerDeadlockingThread extends Thread {
+
+        private static final ReentrantLock l1 = new ReentrantLock();
+        private static final ReentrantLock l2 = new ReentrantLock();
+        private final boolean flag;
+
+        SynchronizerDeadlockingThread(boolean flag) {
+            this.flag = flag;
+            this.setDaemon(true);
+        }
+
+        @Override
+        public void run() {
+            if (this.flag) {
+                try {
+                    l1.lock();
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException ie) {
+                    }
+                    l2.lock();
+                } finally {
+                    l2.unlock();
+                    l1.unlock();
+                }
+            } else {
+                try {
+                    l2.lock();
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException ie) {
+                    }
+                    l1.lock();
+                } finally {
+                    l1.unlock();
+                    l2.unlock();
+                }
+            }
+        }
     }
 
     public void test_parallel_start_status_stop() {
@@ -87,9 +221,11 @@ public class ControlListenerTest extends TestCase {
 
         TestCase.assertEquals(0, new ControlListener(main1, null).statusServer());
         TestCase.assertEquals(0, new ControlListener(main1, null).shutdownServer());
+        delay(); // wait for sever to stop
 
         TestCase.assertEquals(0, new ControlListener(main2, null).statusServer());
         TestCase.assertEquals(0, new ControlListener(main2, null).shutdownServer());
+        delay(); // wait for sever to stop
 
         TestCase.assertTrue(main1.stopCalled);
         TestCase.assertTrue(main2.stopCalled);
@@ -118,6 +254,8 @@ public class ControlListenerTest extends TestCase {
         TestCase.assertEquals(0, new ControlListener(main1, null).statusServer());
         TestCase.assertEquals(0, new ControlListener(main1, null).shutdownServer());
 
+        delay(); // wait for server to stop
+
         TestCase.assertTrue(main1.stopCalled);
 
         delay();
@@ -129,6 +267,8 @@ public class ControlListenerTest extends TestCase {
 
         TestCase.assertEquals(0, new ControlListener(main2, null).statusServer());
         TestCase.assertEquals(0, new ControlListener(main2, null).shutdownServer());
+
+        delay(); // wait for server to stop
 
         TestCase.assertTrue(main2.stopCalled);
 
@@ -154,6 +294,8 @@ public class ControlListenerTest extends TestCase {
 
         TestCase.assertEquals(3, new ControlListener(main, null).shutdownServer());
 
+        delay(); // wait for server to stop
+
         TestCase.assertFalse(main.stopCalled);
 
         TestCase.assertTrue(ctlFile1.exists());
@@ -168,6 +310,8 @@ public class ControlListenerTest extends TestCase {
         TestCase.assertEquals(4, new ControlListener(main, String.valueOf(port)).statusServer());
 
         TestCase.assertEquals(4, new ControlListener(main, String.valueOf(port)).shutdownServer());
+
+        delay(); // wait for server to stop
 
         TestCase.assertFalse(main.stopCalled);
 
@@ -191,10 +335,27 @@ public class ControlListenerTest extends TestCase {
 
         TestCase.assertEquals(4, new ControlListener(main, null).shutdownServer());
 
+        delay(); // wait server to stop
+
         TestCase.assertFalse(main.stopCalled);
 
         TestCase.assertTrue(ctlFile1.exists());
     }
+
+    public void test_generateKey() throws Throwable {
+        Pattern pattern = Pattern.compile("([a-zA-Z0-9-_=]+)");
+        MyMain main = new MyMain(SLING1);
+        ControlListener cl = new ControlListener(main, null);
+
+        String secretkey = (String) PrivateAccessor.invoke(cl, "generateKey", new Class[] {}, new Object[] {});
+        Assert.assertTrue(secretkey.length() >= 32);
+        Matcher matcher = pattern.matcher(secretkey);
+        if (!matcher.matches()) {
+            Assert.fail();
+        }
+    }
+
+    //-------------------- private section -----------------------------
 
     private int getPort() {
         ServerSocket s = null;
@@ -224,16 +385,13 @@ public class ControlListenerTest extends TestCase {
 
     private static class MyMain extends Main {
 
-        boolean stopCalled;
+        volatile boolean stopCalled;
 
         MyMain(final String slingHome) {
-            super(new HashMap<String, String>() {
-                {
-                    put(SharedConstants.SLING_HOME, slingHome);
-                }
-            });
+            super(Collections.singletonMap(SharedConstants.SLING_HOME, slingHome));
         }
 
+        @Override
         protected void doStop() {
             this.stopCalled = true;
         }
@@ -241,6 +399,36 @@ public class ControlListenerTest extends TestCase {
         @Override
         void terminateVM(int status) {
             // not really
+        }
+    }
+
+    private static class MyMain2 extends MyMain {
+
+        private final Object trigger = new Object();
+
+        public MyMain2(final String slingHome) {
+            super(slingHome);
+        }
+
+        @Override
+        protected void doStop() {
+            super.doStop();
+
+            // wait for trigger to continue simlutating a blocked
+            // shutdown -- at most 10 seconds, though
+            synchronized (this.trigger) {
+                try {
+                    this.trigger.wait(10 * 1000L);
+                } catch (InterruptedException e) {
+                    // ignore and just continue
+                }
+            }
+        }
+
+        void trigger() {
+            synchronized (this.trigger) {
+                this.trigger.notifyAll();
+            }
         }
     }
 }

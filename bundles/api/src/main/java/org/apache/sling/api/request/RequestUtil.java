@@ -22,11 +22,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
 import javax.servlet.Servlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import org.apache.sling.api.servlets.HttpConstants;
+
 import org.apache.sling.api.SlingHttpServletRequest;
+import org.apache.sling.api.servlets.HttpConstants;
 
 /**
  * Request related utility methods.
@@ -34,7 +37,7 @@ import org.apache.sling.api.SlingHttpServletRequest;
  * This class is not intended to be extended or instantiated because it just
  * provides static utility methods not intended to be overwritten.
  *
- * @since 2.1
+ * @since 2.1 (Sling API Bundle 2.1.0)
  */
 public class RequestUtil {
 
@@ -44,16 +47,16 @@ public class RequestUtil {
      * <pre>
      *            Header = Token { &quot;,&quot; Token } .
      *            Token = name { &quot;;&quot; Parameter } .
-     *            Paramter = name [ &quot;=&quot; value ] .
+     *            Parameter = name [ &quot;=&quot; value ] .
      * </pre>
      *
      * "," and ";" are not allowed within name and value
      *
-     * @param value
+     * @param value The header value
      * @return A Map indexed by the Token names where the values are Map
      *         instances indexed by parameter name
      */
-    public static Map<String, Map<String, String>> parserHeader(String value) {
+    public static @Nonnull Map<String, Map<String, String>> parserHeader(@Nonnull String value) {
         Map<String, Map<String, String>> result = new HashMap<String, Map<String, String>>();
         String[] tokens = value.split(",");
         for (int i = 0; i < tokens.length; i++) {
@@ -84,17 +87,17 @@ public class RequestUtil {
      * <pre>
      *            Header = Token { &quot;,&quot; Token } .
      *            Token = name { &quot;;&quot; &quot;q&quot; [ &quot;=&quot; value ] } .
-     *            Paramter =  .
+     *            Parameter =  .
      * </pre>
      *
      * "," and ";" are not allowed within name and value
      *
-     * @param value
+     * @param value The header value
      * @return A Map indexed by the Token names where the values are
      *         <code>Double</code> instances providing the value of the
      *         <code>q</code> parameter.
      */
-    public static Map<String, Double> parserAcceptHeader(String value) {
+    public static @Nonnull Map<String, Double> parserAcceptHeader(@Nonnull String value) {
         Map<String, Double> result = new HashMap<String, Double>();
         String[] tokens = value.split(",");
         for (int i = 0; i < tokens.length; i++) {
@@ -130,8 +133,11 @@ public class RequestUtil {
      * <li>Otherwise check the servlet info
      * <li>Otherwise use the fully qualified name of the servlet class
      * </ol>
+     *
+     * @param servlet The servlet
+     * @return The name of the servlet.
      */
-    public static String getServletName(Servlet servlet) {
+    public static @Nonnull String getServletName(@Nonnull Servlet servlet) {
         String name = null;
 
         if (servlet.getServletConfig() != null) {
@@ -158,8 +164,8 @@ public class RequestUtil {
      * @return The previous value of the named request attribute or
      *         <code>null</code> if it was not set.
      */
-    public static Object setRequestAttribute(HttpServletRequest request,
-            String name, Object value) {
+    public static @CheckForNull Object setRequestAttribute(@Nonnull HttpServletRequest request,
+            @Nonnull String name, Object value) {
         Object oldValue = request.getAttribute(name);
         if (value == null) {
             request.removeAttribute(name);
@@ -177,7 +183,7 @@ public class RequestUtil {
      * @param resp the response
      * @return <code>true</code> if the response was set
      */
-    public static boolean handleIfModifiedSince(SlingHttpServletRequest req, HttpServletResponse resp){
+    public static boolean handleIfModifiedSince(@Nonnull SlingHttpServletRequest req, @Nonnull HttpServletResponse resp){
         boolean responseSet=false;
         long lastModified=req.getResource().getResourceMetadata().getModificationTime();
         if (lastModified!=-1){

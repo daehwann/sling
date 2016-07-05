@@ -21,10 +21,6 @@ import org.osgi.framework.Version;
 
 public interface ISlingLaunchpadServer {
 
-    public static final int PUBLISH_STATE_NEVER = 1;
-    public static final int PUBLISH_STATE_RESOURCE_CHANGE = 2;
-    public static final int PUBLISH_STATE_BUILD_EVENT = 3;
-
     public static final String PROP_PASSWORD = "launchpad.password";
     public static final String PROP_USERNAME = "launchpad.username";
     public static final String PROP_CONTEXT_PATH = "launchpad.contextPath";
@@ -32,11 +28,8 @@ public interface ISlingLaunchpadServer {
     public static final String PROP_DEBUG_PORT = "launchpad.debugPort";
 
     public static final String PROP_INSTALL_LOCALLY = "launchpad.installLocally";
+    public static final String PROP_RESOLVE_SOURCES = "launchpad.resolveSources";
     public static final String PROP_BUNDLE_VERSION_FORMAT = "launchpad.bundle.%s.version";
-    
-    void setPublishState(int publishState, IProgressMonitor monitor);
-
-    int getPublishState();
 
     ISlingLaunchpadConfiguration getConfiguration();
 

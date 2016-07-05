@@ -18,16 +18,21 @@
  */
 package org.apache.sling.jcr.base;
 
+import java.util.Arrays;
 import java.util.Dictionary;
 
 import javax.jcr.Repository;
 
 import org.apache.sling.jcr.api.SlingRepository;
+import org.apache.sling.jcr.api.SlingRepositoryInitializer;
+import org.apache.sling.jcr.base.internal.loader.Loader;
 import org.apache.sling.serviceusermapping.ServiceUserMapper;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceFactory;
+import org.osgi.framework.ServiceReference;
 import org.osgi.framework.ServiceRegistration;
+import org.osgi.util.tracker.ServiceTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,23 +48,23 @@ import aQute.bnd.annotation.ProviderType;
  * implementations of this class provide actual integration into the runtime
  * context. The livecycle of the repository instance is defined as follows:
  * <p>
- * To start the repository instance, the implemetation calls the
+ * To start the repository instance, the implementation calls the
  * {@link #start(BundleContext, String, boolean)}method which goes through the
  * steps of instantiating the repository, setting things up, and registering the
  * repository as an OSGi service:
  * <ol>
  * <li>{@link #acquireRepository()}</li>
  * <li>{@link #create(Bundle)}</li>
- * <li>{@link #setup(BundleContext, SlingRepository)}</li>
  * <li>{@link #registerService()}</li>
  * </ol>
+ * Earlier versions of this class had an additional <code>setup</code> method, 
+ * whatever code was there can be moved to the <core>create</code> method.
  * <p>
  * To stop the repository instance, the implementation calls the {@link #stop()}
  * method which goes through the setps of unregistering the OSGi service,
  * tearing all special settings down and finally shutting down the repository:
  * <ol>
  * <li>{@link #unregisterService(ServiceRegistration)}</li>
- * <li>{@link #tearDown()}</li>
  * <li>{@link #destroy(AbstractSlingRepository2)}</li>
  * <li>{@link #disposeRepository(Repository)}</li>
  * </ol>
@@ -70,27 +75,31 @@ import aQute.bnd.annotation.ProviderType;
  * class.
  *
  * @see AbstractSlingRepository2
- * @since API version 2.3 (bundle version 2.3)
+ * @since API version 2.3 (bundle version 2.2.2)
  */
 @ProviderType
-public abstract class AbstractSlingRepositoryManager extends NamespaceMappingSupport {
+public abstract class AbstractSlingRepositoryManager {
 
     /** default log */
     private final Logger log = LoggerFactory.getLogger(getClass());
 
-    private BundleContext bundleContext;
+    private volatile BundleContext bundleContext;
 
-    private Repository repository;
+    private volatile Repository repository;
 
     // the SlingRepository instance used to setup basic stuff
     // see setup and tearDown
-    private AbstractSlingRepository2 masterSlingRepository;
+    private volatile AbstractSlingRepository2 masterSlingRepository;
 
-    private ServiceRegistration repositoryService;
+    private volatile ServiceRegistration repositoryService;
 
-    private String defaultWorkspace;
+    private volatile String defaultWorkspace;
 
-    private boolean disableLoginAdministrative;
+    private volatile boolean disableLoginAdministrative;
+
+    private volatile ServiceTracker repoInitializerTracker;
+
+    private volatile Loader loader;
 
     /**
      * Returns the default workspace, which may be <code>null</code> meaning to
@@ -172,10 +181,12 @@ public abstract class AbstractSlingRepositoryManager extends NamespaceMappingSup
         final String[] interfaces = getServiceRegistrationInterfaces();
 
         return bundleContext.registerService(interfaces, new ServiceFactory() {
+            @Override
             public Object getService(Bundle bundle, ServiceRegistration registration) {
                 return AbstractSlingRepositoryManager.this.create(bundle);
             }
 
+            @Override
             public void ungetService(Bundle bundle, ServiceRegistration registration, Object service) {
                 AbstractSlingRepositoryManager.this.destroy((AbstractSlingRepository2) service);
             }
@@ -299,6 +310,9 @@ public abstract class AbstractSlingRepositoryManager extends NamespaceMappingSup
         this.defaultWorkspace = defaultWorkspace;
         this.disableLoginAdministrative = disableLoginAdministrative;
 
+        this.repoInitializerTracker = new ServiceTracker(bundleContext, SlingRepositoryInitializer.class.getName(), null);
+        this.repoInitializerTracker.open();
+
         try {
             log.debug("start: calling acquireRepository()");
             Repository newRepo = this.acquireRepository();
@@ -309,8 +323,22 @@ public abstract class AbstractSlingRepositoryManager extends NamespaceMappingSup
                 this.repository = newRepo;
                 this.masterSlingRepository = this.create(this.bundleContext.getBundle());
 
-                log.debug("start: setting up NamespaceMapping support");
-                this.setup(this.bundleContext, this.masterSlingRepository);
+                log.debug("start: setting up Loader");
+                this.loader = new Loader(this.masterSlingRepository, this.bundleContext);
+
+                log.debug("start: calling SlingRepositoryInitializer");
+                Throwable t = null;
+                try {
+                    executeRepositoryInitializers(this.masterSlingRepository);
+                } catch(Exception e) {
+                    t = e;
+                } catch(Error e) {
+                    t = e;
+                }
+                if(t != null) {
+                    log.error("Exception in a SlingRepositoryInitializer, SlingRepository service registration aborted", t);
+                    return false;
+                }
 
                 log.debug("start: calling registerService()");
                 this.repositoryService = registerService();
@@ -330,10 +358,33 @@ public abstract class AbstractSlingRepositoryManager extends NamespaceMappingSup
         return false;
     }
 
+    private void executeRepositoryInitializers(SlingRepository repo) throws Exception {
+        final ServiceReference [] refs = repoInitializerTracker.getServiceReferences();
+        if(refs == null || refs.length == 0) {
+            log.debug("No SlingRepositoryInitializer services found");
+            return;
+        }
+        Arrays.sort(refs);
+        for(ServiceReference ref : refs) {
+            final SlingRepositoryInitializer sri = (SlingRepositoryInitializer)bundleContext.getService(ref);
+            log.debug("Executing {}", sri);
+            try {
+                sri.processRepository(repo);
+            } finally {
+                bundleContext.ungetService(ref);
+            }
+        }
+    }
+
     /**
      * This method must be called if overwritten by implementations !!
      */
     protected final void stop() {
+        if(repoInitializerTracker != null) {
+            repoInitializerTracker.close();
+            repoInitializerTracker = null;
+        }
+
         // ensure the repository is really disposed off
         if (repository != null || repositoryService != null) {
             log.info("stop: Repository still running, forcing shutdown");
@@ -353,8 +404,12 @@ public abstract class AbstractSlingRepositoryManager extends NamespaceMappingSup
                     Repository oldRepo = repository;
                     repository = null;
 
-                    // stop namespace support
-                    this.tearDown();
+                    // stop loader
+                    if ( this.loader != null ) {
+                        this.loader.dispose();
+                        this.loader = null;
+                    }
+                    // destroy repository
                     this.destroy(this.masterSlingRepository);
 
                     try {

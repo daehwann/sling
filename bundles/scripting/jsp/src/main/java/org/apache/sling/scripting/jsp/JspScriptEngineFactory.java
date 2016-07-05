@@ -18,6 +18,11 @@ package org.apache.sling.scripting.jsp;
 
 import static org.apache.sling.api.scripting.SlingBindings.SLING;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.io.Reader;
 import java.util.Dictionary;
 
@@ -25,9 +30,14 @@ import javax.script.Bindings;
 import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
+import javax.servlet.Servlet;
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Properties;
@@ -46,10 +56,10 @@ import org.apache.sling.api.scripting.SlingScriptConstants;
 import org.apache.sling.api.scripting.SlingScriptHelper;
 import org.apache.sling.commons.classloader.ClassLoaderWriter;
 import org.apache.sling.commons.classloader.DynamicClassLoaderManager;
+import org.apache.sling.commons.compiler.JavaCompiler;
 import org.apache.sling.commons.osgi.PropertiesUtil;
 import org.apache.sling.scripting.api.AbstractScriptEngineFactory;
 import org.apache.sling.scripting.api.AbstractSlingScriptEngine;
-import org.apache.sling.scripting.jsp.jasper.Options;
 import org.apache.sling.scripting.jsp.jasper.compiler.JspRuntimeContext;
 import org.apache.sling.scripting.jsp.jasper.compiler.JspRuntimeContext.JspFactoryHandler;
 import org.apache.sling.scripting.jsp.jasper.runtime.AnnotationProcessor;
@@ -70,10 +80,12 @@ import org.slf4j.LoggerFactory;
 @Component(label="%jsphandler.name",
            description="%jsphandler.description",
            metatype=true)
-@Service(value={javax.script.ScriptEngineFactory.class, EventHandler.class})
+@Service(value={javax.script.ScriptEngineFactory.class, EventHandler.class, Servlet.class})
 @Properties({
    @Property(name="service.description",value="JSP Script Handler"),
    @Property(name="service.vendor",value="The Apache Software Foundation"),
+   @Property(name="jasper.compilerTargetVM", value=JspServletOptions.AUTOMATIC_VERSION),
+   @Property(name="jasper.compilerSourceVM", value=JspServletOptions.AUTOMATIC_VERSION),
    @Property(name="jasper.classdebuginfo",boolValue=true),
    @Property(name="jasper.enablePooling",boolValue=true),
    @Property(name="jasper.ieClassId",value="clsid:8AD9C840-044E-11D1-B3E9-00805F499D93"),
@@ -82,11 +94,14 @@ import org.slf4j.LoggerFactory;
    @Property(name="jasper.mappedfile",boolValue=true),
    @Property(name="jasper.trimSpaces",boolValue=false),
    @Property(name="jasper.displaySourceFragments",boolValue=false),
-   @Property(name=EventConstants.EVENT_TOPIC, value="org/apache/sling/api/resource/*")
+   @Property(name=EventConstants.EVENT_TOPIC, value={"org/apache/sling/api/resource/*"}, propertyPrivate=true),
+   @Property(name="felix.webconsole.label", value="slingjsp", propertyPrivate=true),
+   @Property(name="felix.webconsole.title", value="JSP", propertyPrivate=true),
+   @Property(name="felix.webconsole.category", value="Sling", propertyPrivate=true)
 })
 public class JspScriptEngineFactory
     extends AbstractScriptEngineFactory
-    implements EventHandler {
+    implements EventHandler, Servlet {
 
     @Property(boolValue = true)
     private static final String PROP_DEFAULT_IS_SESSION = "default.is.session";
@@ -105,6 +120,9 @@ public class JspScriptEngineFactory
 
     private ClassLoader dynamicClassLoader;
 
+    @Reference
+    private JavaCompiler javaCompiler;
+
     /** The io provider for reading and writing. */
     private SlingIOProvider ioProvider;
 
@@ -112,11 +130,11 @@ public class JspScriptEngineFactory
 
     private JspRuntimeContext jspRuntimeContext;
 
-    private Options options;
+    private JspServletOptions options;
 
     private JspServletContext jspServletContext;
 
-    private ServletConfig servletConfig;
+    private JspServletConfig servletConfig;
 
     private boolean defaultIsSession;
 
@@ -135,6 +153,7 @@ public class JspScriptEngineFactory
     /**
      * @see javax.script.ScriptEngineFactory#getScriptEngine()
      */
+    @Override
     public ScriptEngine getScriptEngine() {
         return new JspScriptEngine();
     }
@@ -142,6 +161,7 @@ public class JspScriptEngineFactory
     /**
      * @see javax.script.ScriptEngineFactory#getLanguageName()
      */
+    @Override
     public String getLanguageName() {
         return "Java Server Pages";
     }
@@ -149,6 +169,7 @@ public class JspScriptEngineFactory
     /**
      * @see javax.script.ScriptEngineFactory#getLanguageVersion()
      */
+    @Override
     public String getLanguageVersion() {
         return "2.1";
     }
@@ -276,9 +297,17 @@ public class JspScriptEngineFactory
             if ( wrapper.isValid() ) {
                 return wrapper;
             }
-            rctxt.removeWrapper(wrapper.getJspUri());
-            this.renewJspRuntimeContext();
-            rctxt = this.getJspRuntimeContext();
+            synchronized ( this ) {
+                rctxt = this.getJspRuntimeContext();
+                wrapper = rctxt.getWrapper(scriptName);
+                if ( wrapper != null ) {
+                    if ( wrapper.isValid() ) {
+                        return wrapper;
+                    }
+                    this.renewJspRuntimeContext();
+                    rctxt = this.getJspRuntimeContext();
+                }
+            }
         }
 
         wrapper = new JspServletWrapper(servletConfig, options,
@@ -301,7 +330,7 @@ public class JspScriptEngineFactory
      * Activate this component
      */
     protected void activate(final ComponentContext componentContext) {
-        Dictionary<?, ?> properties = componentContext.getProperties();
+        final Dictionary<?, ?> properties = componentContext.getProperties();
         this.defaultIsSession = PropertiesUtil.toBoolean(properties.get(PROP_DEFAULT_IS_SESSION), true);
 
         // set the current class loader as the thread context loader for
@@ -315,7 +344,7 @@ public class JspScriptEngineFactory
             this.tldLocationsCache = new SlingTldLocationsCache(componentContext.getBundleContext());
 
             // prepare some classes
-            ioProvider = new SlingIOProvider(classLoaderWriter);
+            ioProvider = new SlingIOProvider(this.classLoaderWriter, this.javaCompiler);
 
             // return options which use the jspClassLoader
             options = new JspServletOptions(slingServletContext, ioProvider,
@@ -324,8 +353,7 @@ public class JspScriptEngineFactory
             jspServletContext = new JspServletContext(ioProvider,
                 slingServletContext, tldLocationsCache);
 
-            servletConfig = new JspServletConfig(jspServletContext,
-                properties);
+            servletConfig = new JspServletConfig(jspServletContext, options.getProperties());
 
         } finally {
             // make sure the context loader is reset after setting up the
@@ -333,14 +361,18 @@ public class JspScriptEngineFactory
             Thread.currentThread().setContextClassLoader(old);
         }
 
-        logger.debug("IMPORTANT: Do not modify the generated servlets");
+        // check for changes in jasper config
+        this.checkJasperConfig();
+
+        logger.info("Activating Apache Sling Script Engine for JSP with options {}", options.getProperties());
+        logger.debug("IMPORTANT: Do not modify the generated servlet classes directly");
     }
 
     /**
      * Activate this component
      */
     protected void deactivate(final ComponentContext componentContext) {
-        logger.debug("JspScriptEngine.deactivate()");
+        logger.info("Deactivating Apache Sling Script Engine for JSP");
 
         if ( this.tldLocationsCache != null ) {
             this.tldLocationsCache.deactivate(componentContext.getBundleContext());
@@ -354,6 +386,59 @@ public class JspScriptEngineFactory
         ioProvider = null;
         this.jspFactoryHandler.destroy();
         this.jspFactoryHandler = null;
+    }
+
+    private static final String CONFIG_PATH = "/jsp.config";
+
+    /**
+     * Check if the jasper configuration changed.
+     */
+    private void checkJasperConfig() {
+        boolean changed = false;
+        InputStream is = null;
+        try {
+            is = this.classLoaderWriter.getInputStream(CONFIG_PATH);
+            final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int length = 0;
+            while ( ( length = is.read(buffer)) != -1 ) {
+                baos.write(buffer, 0, length);
+            }
+            baos.close();
+            final String oldKey = new String(baos.toByteArray(), "UTF-8");
+            changed = !oldKey.equals(this.servletConfig.getConfigKey());
+            if ( changed ) {
+                logger.info("Removing all class files due to jsp configuration change");
+            }
+        } catch ( final IOException notFound ) {
+            changed = true;
+        } finally {
+            if ( is != null ) {
+                try {
+                    is.close();
+                } catch ( final IOException ignore) {
+                    // ignore
+                }
+            }
+        }
+        if ( changed ) {
+            OutputStream os = null;
+            try {
+                os = this.classLoaderWriter.getOutputStream(CONFIG_PATH);
+                os.write(this.servletConfig.getConfigKey().getBytes("UTF-8"));
+            } catch ( final IOException ignore ) {
+                // ignore
+            } finally {
+                if ( os != null ) {
+                    try {
+                        os.close();
+                    } catch ( final IOException ignore ) {
+                        // ignore
+                    }
+                }
+            }
+            this.classLoaderWriter.delete("/org/apache/jsp");
+        }
     }
 
     /**
@@ -435,6 +520,7 @@ public class JspScriptEngineFactory
             super(JspScriptEngineFactory.this);
         }
 
+        @Override
         public Object eval(final Reader script, final ScriptContext context)
                 throws ScriptException {
             Bindings props = context.getBindings(ScriptContext.ENGINE_SCOPE);
@@ -536,6 +622,7 @@ public class JspScriptEngineFactory
     /**
      * @see org.osgi.service.event.EventHandler#handleEvent(org.osgi.service.event.Event)
      */
+    @Override
     public void handleEvent(final Event event) {
         final String path = (String)event.getProperty(SlingConstants.PROPERTY_PATH);
         if ( path != null ) {
@@ -563,5 +650,82 @@ public class JspScriptEngineFactory
             }
         };
         t.start();
+    }
+
+    //
+    // Web Console Plugin
+    //
+    private ServletConfig config;
+
+    /* (non-Javadoc)
+     * @see javax.servlet.Servlet#destroy()
+     */
+    @Override
+    public void destroy() {
+        this.config = null;
+    }
+
+    /* (non-Javadoc)
+     * @see javax.servlet.Servlet#getServletConfig()
+     */
+    @Override
+    public ServletConfig getServletConfig() {
+        return this.config;
+    }
+
+    /* (non-Javadoc)
+     * @see javax.servlet.Servlet#getServletInfo()
+     */
+    @Override
+    public String getServletInfo() {
+        return "";
+    }
+
+    /* (non-Javadoc)
+     * @see javax.servlet.Servlet#init(javax.servlet.ServletConfig)
+     */
+    @Override
+    public void init(final ServletConfig config) throws ServletException {
+        this.config = config;
+    }
+
+    /* (non-Javadoc)
+     * @see javax.servlet.Servlet#service(javax.servlet.ServletRequest, javax.servlet.ServletResponse)
+     */
+    @Override
+    public void service(final ServletRequest request, final ServletResponse response)
+            throws ServletException, IOException {
+        if ( request instanceof HttpServletRequest ) {
+            final HttpServletRequest req = (HttpServletRequest) request;
+            final HttpServletResponse res = (HttpServletResponse) response;
+
+            final String path = req.getContextPath() + req.getServletPath() + req.getPathInfo();
+
+            if ( req.getMethod().equals("POST") ) {
+                final JspRuntimeContext rctxt = this.jspRuntimeContext;
+                this.classLoaderWriter.delete("/org/apache/jsp");
+                if ( rctxt != null ) {
+                    renewJspRuntimeContext();
+                }
+
+                res.sendRedirect(path + "?reset");
+                return;
+            } else if ( req.getMethod().equals("GET") ) {
+                final PrintWriter pw = res.getWriter();
+                pw.println("<h1>Apache Sling JSP Scripting</h1>");
+                pw.println("<br/>");
+                if ( req.getParameter("reset") != null ) {
+                    pw.println("<p>All compiled jsp files removed.");
+                    pw.println("<br/>");
+                }
+                pw.print("<form action='");
+                pw.print(path);
+                pw.println("' method='POST'>");
+                pw.println("<input type='submit' value='Recompile all JSPs'>");
+                pw.println("</form>");
+                return;
+            }
+        }
+        throw new ServletException("Request not supported.");
     }
 }

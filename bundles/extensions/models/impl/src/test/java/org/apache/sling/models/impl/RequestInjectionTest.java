@@ -16,10 +16,11 @@
  */
 package org.apache.sling.models.impl;
 
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.mockito.Mockito.when;
 
-import java.util.Collections;
+import java.util.Hashtable;
 
 import org.apache.sling.api.SlingHttpServletRequest;
 import org.apache.sling.api.scripting.SlingBindings;
@@ -32,7 +33,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.Constants;
 import org.osgi.service.component.ComponentContext;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -55,6 +55,7 @@ public class RequestInjectionTest {
     @Before
     public void setup() {
         when(componentCtx.getBundleContext()).thenReturn(bundleContext);
+        when(componentCtx.getProperties()).thenReturn(new Hashtable<String, Object>());
 
         SlingBindings bindings = new SlingBindings();
         bindings.setSling(sling);
@@ -62,13 +63,22 @@ public class RequestInjectionTest {
 
         factory = new ModelAdapterFactory();
         factory.activate(componentCtx);
-        factory.bindInjector(new BindingsInjector(),
-                Collections.<String, Object> singletonMap(Constants.SERVICE_ID, 0L));
+        factory.bindInjector(new BindingsInjector(), new ServicePropertiesMap(1, 1));
+        
+        factory.adapterImplementations.addClassesAsAdapterAndImplementation(BindingsModel.class, org.apache.sling.models.testmodels.classes.constructorinjection.BindingsModel.class);
     }
 
     @Test
-    public void testNamedInjection() {
+    public void testNamedInjectionField() {
         BindingsModel model = factory.getAdapter(request, BindingsModel.class);
+        assertNotNull(model.getSling());
+        assertEquals(sling, model.getSling());
+    }
+
+    @Test
+    public void testNamedInjectionConstructor() {
+        org.apache.sling.models.testmodels.classes.constructorinjection.BindingsModel model
+                = factory.getAdapter(request, org.apache.sling.models.testmodels.classes.constructorinjection.BindingsModel.class);
         assertNotNull(model.getSling());
         assertEquals(sling, model.getSling());
     }

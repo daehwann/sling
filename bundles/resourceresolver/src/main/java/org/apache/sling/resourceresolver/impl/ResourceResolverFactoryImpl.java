@@ -22,10 +22,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.sling.api.resource.LoginException;
-import org.apache.sling.api.resource.ResourceProviderFactory;
 import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.api.resource.ResourceResolverFactory;
 import org.apache.sling.serviceusermapping.ServiceUserMapper;
+import org.apache.sling.spi.resource.provider.ResourceProvider;
 import org.osgi.framework.Bundle;
 
 /**
@@ -57,6 +57,9 @@ public class ResourceResolverFactoryImpl implements ResourceResolverFactory {
 
     // ---------- Resource Resolver Factory ------------------------------------
 
+    /**
+     * @see org.apache.sling.api.resource.ResourceResolverFactory#getServiceResourceResolver(java.util.Map)
+     */
     public ResourceResolver getServiceResourceResolver(final Map<String, Object> passedAuthenticationInfo) throws LoginException {
         // create a copy of the passed authentication info as we modify the map
         final Map<String, Object> authenticationInfo = new HashMap<String, Object>();
@@ -83,18 +86,31 @@ public class ResourceResolverFactoryImpl implements ResourceResolverFactory {
 
         // ensure proper user name and service bundle
         authenticationInfo.put(ResourceResolverFactory.USER, userName);
-        authenticationInfo.put(ResourceProviderFactory.SERVICE_BUNDLE, this.usingBundle);
+        authenticationInfo.put(ResourceProvider.AUTH_SERVICE_BUNDLE, this.usingBundle);
 
         return commonFactory.getResourceResolverInternal(authenticationInfo, false);
     }
 
+    /**
+     * @see org.apache.sling.api.resource.ResourceResolverFactory#getResourceResolver(java.util.Map)
+     */
     public ResourceResolver getResourceResolver(
             final Map<String, Object> authenticationInfo) throws LoginException {
         return commonFactory.getResourceResolver(authenticationInfo);
     }
 
+    /**
+     * @see org.apache.sling.api.resource.ResourceResolverFactory#getAdministrativeResourceResolver(java.util.Map)
+     */
     public ResourceResolver getAdministrativeResourceResolver(
             final Map<String, Object> authenticationInfo) throws LoginException {
         return commonFactory.getAdministrativeResourceResolver(authenticationInfo);
+    }
+
+    /**
+     * @see org.apache.sling.api.resource.ResourceResolverFactory#getThreadResourceResolver()
+     */
+    public ResourceResolver getThreadResourceResolver() {
+        return commonFactory.getThreadResourceResolver();
     }
 }

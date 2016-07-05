@@ -19,7 +19,10 @@
 package org.apache.sling.auth.core.impl;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.Hashtable;
@@ -27,6 +30,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import javax.jcr.SimpleCredentials;
+import javax.security.auth.login.AccountLockedException;
+import javax.security.auth.login.AccountNotFoundException;
+import javax.security.auth.login.CredentialExpiredException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletRequestEvent;
 import javax.servlet.ServletRequestListener;
@@ -174,6 +181,12 @@ public class SlingAuthenticator implements Authenticator,
     private static final String DEFAULT_AUTH_URI_SUFFIX = "/j_security_check";
 
     /**
+     * The name of the form submission parameter providing the new password of
+     * the user (value is "j_newpassword").
+     */
+    private static final String PAR_NEW_PASSWORD = "j_newpassword";
+
+    /**
      * The name of the configuration property used to set a (potentially
      * empty) list of request URI suffixes intended to be handled by
      * authentication handlers.
@@ -262,7 +275,7 @@ public class SlingAuthenticator implements Authenticator,
      * The event admin service.
      */
     @Reference(policy=ReferencePolicy.DYNAMIC)
-    private EventAdmin eventAdmin;
+    private volatile EventAdmin eventAdmin;
 
     // ---------- SCR integration
 
@@ -277,6 +290,7 @@ public class SlingAuthenticator implements Authenticator,
         Hashtable<String, Object> props = new Hashtable<String, Object>();
         props.put("felix.webconsole.label", plugin.getLabel());
         props.put("felix.webconsole.title", plugin.getTitle());
+        props.put("felix.webconsole.category", "Sling");
         props.put(Constants.SERVICE_DESCRIPTION,
             "Sling Request Authenticator WebConsole Plugin");
         props.put(Constants.SERVICE_VENDOR,
@@ -419,6 +433,7 @@ public class SlingAuthenticator implements Authenticator,
      *         is assumed a response has been sent to the client and the request
      *         is terminated.
      */
+    @Override
     public boolean handleSecurity(HttpServletRequest request,
             HttpServletResponse response) {
 
@@ -439,6 +454,7 @@ public class SlingAuthenticator implements Authenticator,
         if (process && expectAuthenticationHandler(request)) {
             log.warn("handleSecurity: AuthenticationHandler did not block request; access denied");
             request.removeAttribute(AuthenticationHandler.FAILURE_REASON);
+            request.removeAttribute(AuthenticationHandler.FAILURE_REASON_CODE);
             AuthUtil.sendInvalid(request, response);
             return false;
         }
@@ -455,7 +471,7 @@ public class SlingAuthenticator implements Authenticator,
         try {
             postProcess(authInfo, request, response);
         } catch (LoginException e) {
-            handleLoginFailure(request, response, authInfo.getUser(), e);
+            handleLoginFailure(request, response, authInfo, e);
             return false;
         }
 
@@ -503,6 +519,7 @@ public class SlingAuthenticator implements Authenticator,
      * @throws NoAuthenticationHandlerException If no authentication handler
      *             claims responsibility to authenticate the request.
      */
+    @Override
     public void login(HttpServletRequest request, HttpServletResponse response) {
 
         // ensure the response is not committed yet
@@ -511,14 +528,14 @@ public class SlingAuthenticator implements Authenticator,
         }
 
         // select path used for authentication handler selection
-        final List<AbstractAuthenticationHandlerHolder>[] holderListArray = this.authHandlerCache.findApplicableHolder(request);
+        final Collection<AbstractAuthenticationHandlerHolder>[] holdersArray = this.authHandlerCache
+                .findApplicableHolder(request);
         final String path = getHandlerSelectionPath(request);
         boolean done = false;
-        for(int m = 0; !done && m < holderListArray.length; m++) {
-            final List<AbstractAuthenticationHandlerHolder> holderList = holderListArray[m];
+        for (int m = 0; !done && m < holdersArray.length; m++) {
+            final Collection<AbstractAuthenticationHandlerHolder> holderList = holdersArray[m];
             if ( holderList != null ) {
-                for (int i = 0; !done && i < holderList.size(); i++) {
-                    final AbstractAuthenticationHandlerHolder holder = holderList.get(i);
+                for (AbstractAuthenticationHandlerHolder holder : holderList) {
                     if (path.startsWith(holder.path)) {
                         log.debug("login: requesting authentication using handler: {}",
                             holder);
@@ -530,6 +547,9 @@ public class SlingAuthenticator implements Authenticator,
                                 "login: Failed sending authentication request through handler "
                                     + holder + ", access forbidden", ioe);
                             done = true;
+                        }
+                        if (done) {
+                            break;
                         }
                     }
                 }
@@ -544,9 +564,9 @@ public class SlingAuthenticator implements Authenticator,
         // no handler could send an authentication request, throw
         if (!done) {
             int size = 0;
-            for (int m = 0; m < holderListArray.length; m++) {
-                if ( holderListArray[m] != null ) {
-                    size += holderListArray[m].size();
+            for (int m = 0; m < holdersArray.length; m++) {
+                if (holdersArray[m] != null) {
+                    size += holdersArray[m].size();
                 }
             }
             log.info("login: No handler for request ({} handlers available)", size);
@@ -559,6 +579,7 @@ public class SlingAuthenticator implements Authenticator,
      * {@link org.apache.sling.auth.core.spi.AuthenticationHandler}
      * authentication handlers.
      */
+    @Override
     public void logout(HttpServletRequest request, HttpServletResponse response) {
 
         // ensure the response is not committed yet
@@ -570,12 +591,12 @@ public class SlingAuthenticator implements Authenticator,
         setSudoCookie(request, response, new AuthenticationInfo("dummy", request.getRemoteUser()));
 
         final String path = getHandlerSelectionPath(request);
-        final List<AbstractAuthenticationHandlerHolder>[] holderListArray = this.authHandlerCache.findApplicableHolder(request);
-        for (int m = 0; m < holderListArray.length; m++) {
-            final List<AbstractAuthenticationHandlerHolder> holderList = holderListArray[m];
-            if (holderList != null) {
-                for (int i = 0; i < holderList.size(); i++) {
-                    AbstractAuthenticationHandlerHolder holder = holderList.get(i);
+        final Collection<AbstractAuthenticationHandlerHolder>[] holdersArray = this.authHandlerCache
+                .findApplicableHolder(request);
+        for (int m = 0; m < holdersArray.length; m++) {
+            final Collection<AbstractAuthenticationHandlerHolder> holderSet = holdersArray[m];
+            if (holderSet != null) {
+                for (AbstractAuthenticationHandlerHolder holder : holderSet) {
                     if (path.startsWith(holder.path)) {
                         log.debug("logout: dropping authentication using handler: {}",
                             holder);
@@ -601,10 +622,12 @@ public class SlingAuthenticator implements Authenticator,
 
     // ---------- ServletRequestListener
 
+    @Override
     public void requestInitialized(ServletRequestEvent sre) {
         // don't care
     }
 
+    @Override
     public void requestDestroyed(ServletRequestEvent sre) {
         ServletRequest request = sre.getServletRequest();
         Object resolverAttr = request.getAttribute(REQUEST_ATTRIBUTE_RESOLVER);
@@ -680,21 +703,19 @@ public class SlingAuthenticator implements Authenticator,
     private AuthenticationInfo getAuthenticationInfo(HttpServletRequest request, HttpServletResponse response) {
 
         // Get the path used to select the authenticator, if the SlingServlet
-        // itself has been requested without any more info, this will be null
+        // itself has been requested without any more info, this will be empty
         // and we assume the root (SLING-722)
-        final String path = getPath(request);
+        String path = getPath(request);
         if (path.length() == 0) {
-            // should not happen, be safe an return anonymous credentials
-            log.warn("get authentication info: request path is empty; assuming anonymous");
-            return getAnonymousCredentials();
+            path = "/";
         }
 
-        final List<AbstractAuthenticationHandlerHolder>[] localArray = this.authHandlerCache.findApplicableHolder(request);
+        final Collection<AbstractAuthenticationHandlerHolder>[] localArray = this.authHandlerCache
+                .findApplicableHolder(request);
         for (int m = 0; m < localArray.length; m++) {
-            final List<AbstractAuthenticationHandlerHolder> local = localArray[m];
+            final Collection<AbstractAuthenticationHandlerHolder> local = localArray[m];
             if (local != null) {
-                for (int i = 0; i < local.size(); i++) {
-                    AbstractAuthenticationHandlerHolder holder = local.get(i);
+                for (AbstractAuthenticationHandlerHolder holder : local) {
                     if (path.startsWith(holder.path)) {
                         final AuthenticationInfo authInfo = holder.extractCredentials(
                             request, response);
@@ -759,6 +780,7 @@ public class SlingAuthenticator implements Authenticator,
         // try to connect
         try {
             handleImpersonation(request, authInfo);
+            handlePasswordChange(request, authInfo);
             ResourceResolver resolver = resourceResolverFactory.getResourceResolver(authInfo);
             final boolean impersChanged = setSudoCookie(request, response, authInfo);
 
@@ -807,7 +829,7 @@ public class SlingAuthenticator implements Authenticator,
             // now find a way to get credentials unless the feedback handler
             // has committed a response to the client already
             if (!response.isCommitted()) {
-                handleLoginFailure(request, response, authInfo.getUser(), re);
+                return handleLoginFailure(request, response, authInfo, re);
             }
 
         }
@@ -860,7 +882,7 @@ public class SlingAuthenticator implements Authenticator,
             } catch (LoginException re) {
 
                 // cannot login > fail login, do not try to authenticate
-                handleLoginFailure(request, response, "anonymous user", re);
+                handleLoginFailure(request, response, new AuthenticationInfo(null, "anonymous user"), re);
                 return false;
 
             }
@@ -877,17 +899,17 @@ public class SlingAuthenticator implements Authenticator,
 
     private boolean isAnonAllowed(HttpServletRequest request) {
 
-        final String path = getPath(request);
+        String path = getPath(request);
         if (path.length() == 0) {
-            return false;
+            path = "/";
         }
 
-        final List<AuthenticationRequirementHolder>[] holderListArray = authRequiredCache.findApplicableHolder(request);
-        for(int m = 0; m < holderListArray.length; m++) {
-            final List<AuthenticationRequirementHolder> holderList = holderListArray[m];
-            if ( holderList != null ) {
-                for (int i = 0; i < holderList.size(); i++) {
-                    final AuthenticationRequirementHolder holder = holderList.get(i);
+        final Collection<AuthenticationRequirementHolder>[] holderSetArray = authRequiredCache
+                .findApplicableHolder(request);
+        for (int m = 0; m < holderSetArray.length; m++) {
+            final Collection<AuthenticationRequirementHolder> holders = holderSetArray[m];
+            if (holders != null) {
+                for (AuthenticationRequirementHolder holder : holders) {
                     if (path.startsWith(holder.path)) {
                         return !holder.requiresAuthentication();
                     }
@@ -916,10 +938,12 @@ public class SlingAuthenticator implements Authenticator,
         return info;
     }
 
-    private void handleLoginFailure(final HttpServletRequest request,
-            final HttpServletResponse response, final String user,
+    private boolean handleLoginFailure(final HttpServletRequest request,
+            final HttpServletResponse response, final AuthenticationInfo authInfo,
             final Exception reason) {
 
+        String user = authInfo.getUser();
+        boolean processRequest = false;
         if (reason.getClass().getName().contains("TooManySessionsException")) {
 
             // to many users, send a 503 Service Unavailable
@@ -935,18 +959,43 @@ public class SlingAuthenticator implements Authenticator,
             }
 
         } else if (reason instanceof LoginException) {
-
-            // request authentication information and send 403 (Forbidden)
-            // if no handler can request authentication information.
             log.info("handleLoginFailure: Unable to authenticate {}: {}", user,
-                reason.getMessage());
-            log.debug("handleLoginFailure", reason);
+                    reason.getMessage());
+            if (isAnonAllowed(request) && !expectAuthenticationHandler(request) && !AuthUtil.isValidateRequest(request)) {
+                log.debug("handleLoginFailure: LoginException on an anonymous resource, fallback to getAnonymousResolver");
+                processRequest = getAnonymousResolver(request, response, new AuthenticationInfo(null));
+            } else {
+                // request authentication information and send 403 (Forbidden)
+                // if no handler can request authentication information.
 
-            // preset a reason for the login failure (if not done already)
-            ensureAttribute(request, AuthenticationHandler.FAILURE_REASON,
-                "User name and password do not match");
+                AuthenticationHandler.FAILURE_REASON_CODES code = AuthenticationHandler.FAILURE_REASON_CODES.INVALID_LOGIN;
+                String message = "User name and password do not match";
 
-            doLogin(request, response);
+                if (reason.getCause() instanceof CredentialExpiredException) {
+                    // force failure attribute to be set so handlers can
+                    // react to this special circumstance
+                    Object creds = authInfo.get("user.jcr.credentials");
+                    if (creds instanceof SimpleCredentials && ((SimpleCredentials) creds).getAttribute("PasswordHistoryException") != null) {
+                        code = AuthenticationHandler.FAILURE_REASON_CODES.PASSWORD_EXPIRED_AND_NEW_PASSWORD_IN_HISTORY;
+                        message = "Password expired and new password found in password history";
+                    } else {
+                        code = AuthenticationHandler.FAILURE_REASON_CODES.PASSWORD_EXPIRED;
+                        message = "Password expired";
+                    }
+                } else if (reason.getCause() instanceof AccountLockedException) {
+                    code = AuthenticationHandler.FAILURE_REASON_CODES.ACCOUNT_LOCKED;
+                    message = "Account is locked";
+                } else if (reason.getCause() instanceof AccountNotFoundException) {
+                    code = AuthenticationHandler.FAILURE_REASON_CODES.ACCOUNT_NOT_FOUND;
+                    message = "Account was not found";
+                }
+
+                // preset a reason for the login failure
+                request.setAttribute(AuthenticationHandler.FAILURE_REASON_CODE, code);
+                ensureAttribute(request, AuthenticationHandler.FAILURE_REASON, message);
+
+                doLogin(request, response);
+            }
 
         } else {
 
@@ -964,6 +1013,7 @@ public class SlingAuthenticator implements Authenticator,
                     "handleLoginFailure: Cannot send status 500 to client", ioe);
             }
         }
+        return processRequest;
 
     }
 
@@ -1168,6 +1218,11 @@ public class SlingAuthenticator implements Authenticator,
                 "sendSudoCookie: Failed to quote value '{}' of cookie {}: {}",
                 new Object[] { user, this.sudoCookieName, iae.getMessage() });
             return;
+        } catch (UnsupportedEncodingException e) {
+            log.error(
+                    "sendSudoCookie: Failed to quote value '{}' of cookie {}: {}",
+                    new Object[] { user, this.sudoCookieName, e.getMessage() });
+                return;
         }
 
         if (quotedUser != null) {
@@ -1227,6 +1282,25 @@ public class SlingAuthenticator implements Authenticator,
         // sudo the session if needed
         if (sudo != null && sudo.length() > 0) {
             authInfo.put(ResourceResolverFactory.USER_IMPERSONATION, sudo);
+        }
+    }
+
+    /**
+     * Handles password change based on the request parameter for the new password
+     * (see {@link #newPasswordParameterName}).
+     * <p>
+     * If the new password request parameter is present, it is added to the authInfo
+     * object, which is later transformed to SimpleCredentials attributes.
+     *
+     * @param req The {@link HttpServletRequest} optionally containing
+     *            the new password parameter.
+     * @param authInfo The authentication info into which the
+     *            <code>newPassword</code> property is set.
+     */
+    private void handlePasswordChange(HttpServletRequest req, AuthenticationInfo authInfo) {
+        String newPassword = req.getParameter(PAR_NEW_PASSWORD );
+        if (newPassword != null && newPassword.length() > 0) {
+            authInfo.put("user.newpassword", newPassword);
         }
     }
 
@@ -1311,7 +1385,7 @@ public class SlingAuthenticator implements Authenticator,
                 path = path.substring(ctxPath.length());
             }
         } else {
-            path = request.getPathInfo();
+            path = getPath(request);
         }
 
         if (path == null || path.length() == 0) {
@@ -1347,12 +1421,12 @@ public class SlingAuthenticator implements Authenticator,
         String target = AuthUtil.getLoginResource(request, request.getContextPath());
         if (!AuthUtil.isRedirectValid(request, target)) {
             log.warn("redirectAfterLogout: Desired redirect target '{}' is invalid; redirecting to '/'", target);
-            target = "/";
+            target = request.getContextPath() + "/";
         }
 
         // redirect to there
         try {
-            response.sendRedirect(request.getContextPath() + target);
+            response.sendRedirect(target);
         } catch (IOException e) {
             log.error("Failed to redirect to the page: " + target, e);
         }
@@ -1389,11 +1463,12 @@ public class SlingAuthenticator implements Authenticator,
      *
      * @param value The cookie value to quote
      * @return The quoted cookie value
+     * @throws UnsupportedEncodingException 
      * @throws IllegalArgumentException If the cookie value is <code>null</code>
      *             or cannot be quoted, primarily because it contains a quote
      *             sign.
      */
-    static String quoteCookieValue(final String value) {
+    static String quoteCookieValue(final String value) throws UnsupportedEncodingException {
         // method is package private to enable unit testing
 
         if (value == null) {
@@ -1410,7 +1485,7 @@ public class SlingAuthenticator implements Authenticator,
                 throw new IllegalArgumentException(
                     "Cookie value may not contain CTL character");
             } else {
-                builder.append(c);
+                builder.append(URLEncoder.encode(String.valueOf(c), "UTF-8"));
             }
         }
         builder.append('"');
@@ -1477,6 +1552,7 @@ public class SlingAuthenticator implements Authenticator,
             this.authenticator = authenticator;
         }
 
+        @Override
         public void serviceChanged(final ServiceEvent event) {
             synchronized ( props ) {
                 // modification of service properties, unregistration of the

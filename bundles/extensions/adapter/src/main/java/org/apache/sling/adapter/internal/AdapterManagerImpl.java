@@ -22,6 +22,7 @@ import static org.apache.sling.api.adapter.AdapterFactory.ADAPTABLE_CLASSES;
 import static org.apache.sling.api.adapter.AdapterFactory.ADAPTER_CLASSES;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.Hashtable;
@@ -38,6 +39,7 @@ import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.ReferenceCardinality;
 import org.apache.felix.scr.annotations.ReferencePolicy;
 import org.apache.felix.scr.annotations.Service;
+import org.apache.sling.adapter.Adaption;
 import org.apache.sling.api.SlingConstants;
 import org.apache.sling.api.adapter.AdapterFactory;
 import org.apache.sling.api.adapter.AdapterManager;
@@ -45,9 +47,11 @@ import org.apache.sling.api.resource.SyntheticResource;
 import org.apache.sling.commons.osgi.PropertiesUtil;
 import org.osgi.framework.Constants;
 import org.osgi.framework.ServiceReference;
+import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.event.Event;
 import org.osgi.service.event.EventAdmin;
+import org.osgi.service.packageadmin.PackageAdmin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,7 +113,10 @@ public class AdapterManagerImpl implements AdapterManager {
      * The service tracker for the event admin
      */
     @Reference(cardinality=ReferenceCardinality.OPTIONAL_UNARY, policy=ReferencePolicy.DYNAMIC)
-    private EventAdmin eventAdmin;
+    private volatile EventAdmin eventAdmin;
+
+    @Reference
+    private PackageAdmin packageAdmin;
 
     // ---------- AdapterManager interface -------------------------------------
 
@@ -247,6 +254,18 @@ public class AdapterManagerImpl implements AdapterManager {
             return;
         }
 
+        for (String clazz : adaptables) {
+            if (!checkPackage(packageAdmin, clazz)) {
+                log.warn("Adaptable class {} in factory service {} is not in an exported package.", clazz, reference.getProperty(Constants.SERVICE_ID));
+            }
+        }
+
+        for (String clazz : adapters) {
+            if (!checkPackage(packageAdmin, clazz)) {
+                log.warn("Adapter class {} in factory service {} is not in an exported package.", clazz, reference.getProperty(Constants.SERVICE_ID));
+            }
+        }
+
         final AdapterFactoryDescriptor factoryDesc = new AdapterFactoryDescriptor(context,
                 reference, adapters);
 
@@ -267,15 +286,47 @@ public class AdapterManagerImpl implements AdapterManager {
         // clear the factory cache to force rebuild on next access
         this.factoryCache.clear();
 
+        // register adaption
+        final Dictionary<String, Object> props = new Hashtable<String, Object>();
+        props.put(SlingConstants.PROPERTY_ADAPTABLE_CLASSES, adaptables);
+        props.put(SlingConstants.PROPERTY_ADAPTER_CLASSES, adapters);
+
+        ServiceRegistration adaptionRegistration = this.context.getBundleContext().registerService(
+                Adaption.class.getName(), AdaptionImpl.INSTANCE, props);
+        if (log.isDebugEnabled()) {
+            log.debug("Registered service {} with {} : {} and {} : {}", new Object[] { Adaption.class.getName(),
+                    SlingConstants.PROPERTY_ADAPTABLE_CLASSES, Arrays.toString(adaptables),
+                    SlingConstants.PROPERTY_ADAPTER_CLASSES, Arrays.toString(adapters) });
+        }
+        factoryDesc.setAdaption(adaptionRegistration);
+
         // send event
         final EventAdmin localEA = this.eventAdmin;
         if ( localEA != null ) {
-            final Dictionary<String, Object> props = new Hashtable<String, Object>();
-            props.put(SlingConstants.PROPERTY_ADAPTABLE_CLASSES, adaptables);
-            props.put(SlingConstants.PROPERTY_ADAPTER_CLASSES, adapters);
             localEA.postEvent(new Event(SlingConstants.TOPIC_ADAPTER_FACTORY_ADDED,
                     props));
         }
+    }
+    
+    static String getPackageName(String clazz) {
+        final int lastDot = clazz.lastIndexOf('.');
+        return lastDot <= 0 ? "" : clazz.substring(0, lastDot);
+    }
+
+    /**
+     * Check that the package containing the class is exported or is a java.*
+     * class.
+     * 
+     * @param packageAdmin the PackageAdmin service
+     * @param clazz the class name
+     * @return true if the package is exported
+     */
+    static boolean checkPackage(PackageAdmin packageAdmin, String clazz) {
+        final String packageName = getPackageName(clazz); 
+        if (packageName.startsWith("java.")) {
+            return true;
+        }
+        return packageAdmin.getExportedPackage(packageName) != null;
     }
 
     /**
@@ -296,13 +347,25 @@ public class AdapterManagerImpl implements AdapterManager {
 
         boolean factoriesModified = false;
         AdapterFactoryDescriptorMap adfMap = null;
+
+        AdapterFactoryDescriptor removedDescriptor = null;
         for (final String adaptable : adaptables) {
             synchronized ( this.descriptors ) {
                 adfMap = this.descriptors.get(adaptable);
             }
             if (adfMap != null) {
                 synchronized ( adfMap ) {
-                    factoriesModified |= (adfMap.remove(reference) != null);
+                    AdapterFactoryDescriptor factoryDesc = adfMap.remove(reference);
+                    if (factoryDesc != null) {
+                        factoriesModified = true;
+                        // A single ServiceReference should correspond to a single Adaption service being registered
+                        // Since the code paths above does not fully guarantee it though, let's keep this check in place
+                        if (removedDescriptor != null && removedDescriptor != factoryDesc) {
+                            log.error("When unregistering reference {} got duplicate service descriptors {} and {}. Unregistration of {} services may be incomplete.",
+                                    new Object[] { reference, removedDescriptor, factoryDesc, Adaption.class.getName()} );
+                        }
+                        removedDescriptor = factoryDesc;
+                    }
                 }
             }
         }
@@ -311,6 +374,16 @@ public class AdapterManagerImpl implements AdapterManager {
         // removed
         if (factoriesModified) {
             this.factoryCache.clear();
+        }
+
+        // unregister adaption
+        if (removedDescriptor != null) {
+            removedDescriptor.getAdaption().unregister();
+            if (log.isDebugEnabled()) {
+                log.debug("Unregistered service {} with {} : {} and {} : {}", new Object[] { Adaption.class.getName(),
+                        SlingConstants.PROPERTY_ADAPTABLE_CLASSES, Arrays.toString(adaptables),
+                        SlingConstants.PROPERTY_ADAPTER_CLASSES, Arrays.toString(adapters) });
+            }
         }
 
         // send event

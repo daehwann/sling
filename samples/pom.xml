@@ -66,7 +66,6 @@
           <module>javashell</module>
           <module>path-based-rtp</module>
           <module>post-servlet-extensions</module>
-          <module>simple-demo</module>
           <module>slingshot</module>
           <module>webloader/service</module>
           <module>webloader/ui</module>
@@ -76,5 +75,6 @@
           <module>framework-fragment</module>
           <module>usermanager-ui</module>
           <module>accessmanager-ui</module>
+          <module>mail-archive</module>
   </modules>
 </project>

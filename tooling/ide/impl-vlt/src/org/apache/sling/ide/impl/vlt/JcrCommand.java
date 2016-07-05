@@ -17,17 +17,25 @@
 package org.apache.sling.ide.impl.vlt;
 
 import java.io.IOException;
+import java.io.PrintStream;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Set;
 
 import javax.jcr.Credentials;
 import javax.jcr.LoginException;
 import javax.jcr.Node;
+import javax.jcr.NodeIterator;
 import javax.jcr.Property;
 import javax.jcr.PropertyIterator;
 import javax.jcr.Repository;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 
+import org.apache.sling.ide.log.Logger;
 import org.apache.sling.ide.transport.Command;
+import org.apache.sling.ide.transport.Repository.CommandExecutionFlag;
 import org.apache.sling.ide.transport.ResourceProxy;
 import org.apache.sling.ide.transport.Result;
 
@@ -36,12 +44,18 @@ public abstract class JcrCommand<T> implements Command<T> {
     private final Credentials credentials;
     private final Repository repository;
     private final String path;
+    private final Logger logger;
+    private final EnumSet<CommandExecutionFlag> flags;
 
-    public JcrCommand(Repository repository, Credentials credentials, String path) {
+    public JcrCommand(Repository repository, Credentials credentials, String path, Logger logger,
+            CommandExecutionFlag... flags) {
 
         this.repository = repository;
         this.credentials = credentials;
         this.path = path;
+        this.logger = logger;
+        this.flags = EnumSet.noneOf(CommandExecutionFlag.class);
+        this.flags.addAll(Arrays.asList(flags));
     }
 
     @Override
@@ -74,6 +88,18 @@ public abstract class JcrCommand<T> implements Command<T> {
         return path;
     }
 
+    protected Logger getLogger() {
+        return logger;
+    }
+
+    public Set<CommandExecutionFlag> getFlags() {
+        return Collections.unmodifiableSet(flags);
+    }
+    
+    @Override
+    public Kind getKind() {
+        return null;
+    }
 
     protected ResourceProxy nodeToResource(Node node) throws RepositoryException {
     
@@ -93,5 +119,38 @@ public abstract class JcrCommand<T> implements Command<T> {
     
         return resource;
     
+    }
+
+    /**
+     * Recursively prints this node and all its children
+     * 
+     * <p>
+     * Only the node name and the primary node type are printed, with children being indented
+     * 
+     * @param node the node to start at
+     * @param ps the stream to print to
+     * @throws RepositoryException
+     */
+    protected void dumpNode(Node node, PrintStream ps) throws RepositoryException {
+
+        printNode(node, ps);
+        writeChildren(node, 1, ps);
+    }
+
+    private void printNode(Node node, PrintStream ps) throws RepositoryException {
+
+        ps.println(node.getName() + " [" + node.getPrimaryNodeType().getName() + "]");
+    }
+
+    private void writeChildren(Node parent, int depth, PrintStream ps) throws RepositoryException {
+
+        for (NodeIterator it = parent.getNodes(); it.hasNext();) {
+            for (int i = 0; i < depth; i++) {
+                ps.append(' ');
+            }
+            Node child = it.nextNode();
+            printNode(child, ps);
+            writeChildren(child, depth + 1, ps);
+        }
     }
 }

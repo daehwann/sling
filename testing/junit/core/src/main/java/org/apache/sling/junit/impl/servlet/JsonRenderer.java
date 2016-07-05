@@ -19,6 +19,7 @@ package org.apache.sling.junit.impl.servlet;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Collection;
+import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -27,6 +28,8 @@ import org.apache.felix.scr.annotations.Service;
 import org.apache.sling.commons.json.JSONException;
 import org.apache.sling.commons.json.io.JSONWriter;
 import org.apache.sling.junit.Renderer;
+import org.apache.sling.junit.RendererFactory;
+import org.apache.sling.junit.SlingTestContextProvider;
 import org.apache.sling.junit.TestSelector;
 import org.junit.runner.Description;
 import org.junit.runner.Result;
@@ -38,15 +41,20 @@ import org.slf4j.LoggerFactory;
 /** JSON renderer for JUnit servlet */
 @Component(immediate=false)
 @Service
-public class JsonRenderer extends RunListener implements Renderer {
+public class JsonRenderer extends RunListener implements Renderer,RendererFactory {
 
     public static final String EXTENSION = "json";
     public static final String INFO_TYPE_KEY = "INFO_TYPE";
     public static final String INFO_SUBTYPE_KEY = "INFO_SUBTYPE";
+    public static final String TEST_METADATA = "test_metadata";
     private final Logger log = LoggerFactory.getLogger(getClass());
     private JSONWriter writer;
-    private int counter;
     
+    /** @inheritDoc */
+    public Renderer createRenderer() { 
+        return new JsonRenderer();
+    }
+
     /** @inheritDoc */
     public boolean appliesTo(TestSelector selector) {
         return EXTENSION.equals(selector.getExtension());
@@ -59,6 +67,9 @@ public class JsonRenderer extends RunListener implements Renderer {
 
     /** @inheritDoc */
     public void setup(HttpServletResponse response, String pageTitle) throws IOException, UnsupportedEncodingException {
+        if(writer != null) {
+            throw new IllegalStateException("Output Writer already set");
+        }
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
         writer = new JSONWriter(response.getWriter());
@@ -144,6 +155,9 @@ public class JsonRenderer extends RunListener implements Renderer {
     @Override
     public void testFinished(Description description) throws Exception {
         super.testFinished(description);
+        if(SlingTestContextProvider.hasContext()) {
+            outputContextMap(SlingTestContextProvider.getContext().output());
+        }
         endItem();
     }
 
@@ -151,6 +165,7 @@ public class JsonRenderer extends RunListener implements Renderer {
     @Override
     public void testFailure(Failure failure) throws Exception {
         writer.key("failure").value(failure.toString());
+        writer.key("trace").value(failure.getTrace());
     }
     
     @Override
@@ -159,12 +174,24 @@ public class JsonRenderer extends RunListener implements Renderer {
     }
     
     void startItem(String name) throws JSONException {
-        ++counter;
         writer.object();
         writer.key(INFO_TYPE_KEY).value(name);
     }
     
     void endItem() throws JSONException {
         writer.endObject();
+    }
+    
+    void outputContextMap(Map<String, Object> data) throws JSONException {
+        writer.key(TEST_METADATA);
+        writer.object();
+        try {
+            for(Map.Entry<String, Object> e : data.entrySet()) {
+                writer.key(e.getKey());
+                writer.value(e.getValue());
+            }
+        } finally {
+            writer.endObject();
+        }
     }
 }

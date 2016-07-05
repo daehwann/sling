@@ -16,9 +16,28 @@
  */
 package org.apache.sling.ide.transport;
 
+import java.util.Set;
+
+import org.apache.sling.ide.transport.Repository.CommandExecutionFlag;
+
 public interface Command<T> {
+    
+    /**
+     * Defines the major kinds of commands
+     *
+     */
+    enum Kind {
+        DELETE, ADD_OR_UPDATE, REORDER_CHILDREN;
+    }
 
 	Result<T> execute();
 
     String getPath();
+
+    Set<CommandExecutionFlag> getFlags();
+    
+    /**
+     * @return the kind, possibly <code>null</code>
+     */
+    Kind getKind();
 }

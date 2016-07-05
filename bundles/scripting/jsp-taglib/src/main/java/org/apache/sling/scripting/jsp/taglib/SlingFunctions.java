@@ -22,6 +22,7 @@ import org.apache.sling.api.adapter.Adaptable;
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.api.resource.ValueMap;
+import org.apache.sling.scripting.jsp.taglib.helpers.XSSSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,6 +63,19 @@ public class SlingFunctions {
 			log.warn("Null adaptable specified");
 		}
 		return adapted;
+	}
+
+	/**
+	 * XSS encodes the specified text using the specified mode.
+	 * 
+	 * @param value
+	 *            The text to encode
+	 * @param mode
+	 *            The XSS mode to use, see XSSSupport for the list of available modes
+	 * @return the encoded text
+	 */
+	public static String encode(String value, String mode) {
+		return XSSSupport.encode(value, XSSSupport.getEncodingMode(mode));
 	}
 
 	/**
@@ -170,7 +184,6 @@ public class SlingFunctions {
 		return resource != null ? resource.listChildren().hasNext() : false;
 	}
 
-
 	/**
 	 * Method for allowing the invocation of the Sling Resource listChildren
 	 * method.
@@ -207,4 +220,5 @@ public class SlingFunctions {
 		return Thread.currentThread().getContextClassLoader()
 				.loadClass(className);
 	}
+
 }

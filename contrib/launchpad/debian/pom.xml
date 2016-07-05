@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+    -->
+<project
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.apache.sling</groupId>
+        <artifactId>sling</artifactId>
+        <version>26</version>
+        <relativePath/>
+    </parent>
+    <artifactId>sling-server</artifactId>
+    <packaging>jar</packaging>
+    <version>9-SNAPSHOT</version>
+    <name>Apache Sling Launchpad Debian Package Builder</name>
+    <description>
+        Simple packaged installation for sling launchpad standalone jar
+        as a system daemon.
+    </description>
+    <scm>
+        <connection>scm:svn:http://svn.apache.org/repos/asf/sling/trunk/launchpad/builder/debian</connection>
+        <developerConnection>scm:svn:https://svn.apache.org/repos/asf/sling/trunk/launchpad/builder/debian</developerConnection>
+        <url>http://svn.apache.org/viewvc/sling/trunk/launchpad/builder/debian</url>
+    </scm>
+    <properties>
+        <!--
+            jdeb plugin version for debian package
+        -->
+        <jdeb.version>1.4</jdeb.version>
+        <launchpad.version>8</launchpad.version>
+        <slingInstallDir>/opt/sling</slingInstallDir>
+        <slingConfigDir>/etc/sling</slingConfigDir>
+    </properties>
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>jdeb</artifactId>
+                <groupId>org.vafer</groupId>
+                <version>${jdeb.version}</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jdeb</goal>
+                        </goals>
+                        <configuration>
+                            <snapshotExpand>true</snapshotExpand>
+                            <snapshotEnv>BUILD_NUMBER</snapshotEnv>
+                            <classifier>all</classifier>
+                            <dataSet>
+                                <!-- etc/{default,logrotate.d}/sling - conf files -->
+                                <data>
+                                    <src>${project.basedir}/src/root_fs/etc</src>
+                                    <type>directory</type>
+                                    <excludes>**/.svn/,**/init.d/</excludes>
+                                    <conffile>true</conffile>
+                                    <mapper>
+                                        <type>perm</type>
+                                        <prefix>/etc</prefix>
+                                    </mapper>
+                                </data>
+                                <!-- opt/sling - jar files -->
+                                <data>
+                                    <src>${project.build.directory}/opt/sling</src>
+                                    <type>directory</type>
+                                    <conffile>false</conffile>
+                                    <mapper>
+                                        <type>perm</type>
+                                        <prefix>/opt/sling</prefix>
+                                    </mapper>
+                                </data>
+                                <!-- all other root_fs -->
+                                <data>
+                                    <src>${project.basedir}/src/root_fs/</src>
+                                    <type>directory</type>
+                                    <excludes>**/.svn/,**/etc/default/,**/etc/logrotate.d/</excludes>
+                                    <mapper>
+                                        <filemode>775</filemode>
+                                        <type>perm</type>
+                                        <prefix>/</prefix>
+                                    </mapper>
+                                </data>
+                            </dataSet>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy</id>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <phase>process-resources</phase>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.sling</groupId>
+                                    <artifactId>org.apache.sling.launchpad</artifactId>
+                                    <version>${launchpad.version}</version>
+                                    <destFileName>org.apache.sling.launchpad.jar</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                            <outputDirectory>${project.build.directory}/opt/sling</outputDirectory>
+                            <excludeTransitive>true</excludeTransitive>
+                            <overWriteReleases>false</overWriteReleases>
+                            <overWriteSnapshots>false</overWriteSnapshots>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+    <reporting>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <configuration>
+                    <!-- No javadocs -->
+                    <excludePackageNames>
+                        org.apache.sling
+                    </excludePackageNames>
+                </configuration>
+            </plugin>
+        </plugins>
+    </reporting>
+    <repositories>
+        <repository>
+            <id>OPS4J</id>
+            <name>OPS4J Repository</name>
+            <url>http://repository.ops4j.org/maven2</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+</project>

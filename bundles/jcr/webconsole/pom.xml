@@ -23,13 +23,13 @@
     <parent>
         <groupId>org.apache.sling</groupId>
         <artifactId>sling</artifactId>
-        <version>18</version>
-        <relativePath>../../../parent/pom.xml</relativePath>
+        <version>26</version>
+        <relativePath/>
     </parent>
 
     <artifactId>org.apache.sling.jcr.webconsole</artifactId>
     <packaging>bundle</packaging>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.3-SNAPSHOT</version>
 
     <name>Apache Sling JCR WebConsole Bundle</name>
     <description>

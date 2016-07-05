@@ -22,7 +22,13 @@ package org.apache.sling.serviceusermapping.impl;
  * The <code>Mapping</code> class defines the mapping of a service's name and
  * optional service information to a user name.
  */
-class Mapping {
+class Mapping implements Comparable<Mapping> {
+
+
+    /**
+     * The name of the osgi property holding the service name.
+     */
+    static String SERVICENAME = ".serviceName";
 
     private final String serviceName;
 
@@ -86,5 +92,48 @@ class Mapping {
 
     private boolean equals(String str1, String str2) {
         return ((str1 == null) ? str2 == null : str1.equals(str2));
+    }
+
+    @Override
+    public String toString() {
+        return "Mapping [serviceName=" + serviceName + ", subServiceName="
+                + subServiceName + ", userName=" + userName + "]";
+    }
+
+    public String getServiceName() {
+        return serviceName;
+    }
+
+    public String getSubServiceName() {
+        return subServiceName;
+    }
+
+
+    public int compareTo(Mapping o) {
+        if (o == null) {
+            return -1;
+        }
+
+        int result = compare(this.serviceName, o.serviceName);
+        if (result == 0) {
+            result = compare(this.subServiceName, o.subServiceName);
+        }
+        return result;
+    }
+
+    private int compare(String str1, String str2) {
+        if (str1 == str2) {
+            return 0;
+        }
+
+        if (str1 == null) {
+            return -1;
+        }
+
+        if (str2 == null) {
+            return 1;
+        }
+
+        return str1.hashCode() - str2.hashCode();
     }
 }

@@ -21,6 +21,9 @@ package org.apache.sling.api.request;
 import java.io.PrintWriter;
 import java.util.Iterator;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+
 import aQute.bnd.annotation.ProviderType;
 
 /**
@@ -82,45 +85,57 @@ import aQute.bnd.annotation.ProviderType;
 @ProviderType
 public interface RequestProgressTracker {
 
-    /** Creates an entry with the given message */
-     void log(String message);
+    /**
+     * Creates an entry with the given message
+     * @param message The message
+     */
+    void log(@Nonnull String message);
 
     /**
      * Creates an entry with a message constructed from the given
      * <code>MessageFormat</code> format evaluated using the given formatting
      * arguments.
+     * @param format The message
+     * @param args Arguments for the message
      */
-    void log(String format, Object... args);
+    void log(@Nonnull String format, Object... args);
 
     /**
      * Starts a named timer. If a timer of the same name already exists, it is
      * reset to the current time.
+     * @param timerName the name of the timer
      */
-    void startTimer(String timerName);
+    void startTimer(@Nonnull String timerName);
 
     /**
      * Logs an entry with the message set to the name of the timer and the
      * number of milliseconds elapsed since the timer start.
+     * @param timerName the name of the timer
      */
-    void logTimer(String timerName);
+    void logTimer(@Nonnull String timerName);
 
     /**
      * Logs an entry with the message constructed from the given
      * <code>MessageFormat</code> pattern evaluated using the given arguments
      * and the number of milliseconds elapsed since the timer start.
+     * @param timerName the name of the timer
+     * @param format The message
+     * @param args Arguments for the message
      */
-    void logTimer(String timerName, String format, Object... args);
+    void logTimer(@Nonnull String timerName, @Nonnull String format, Object... args);
 
     /**
      * Returns an <code>Iterator</code> of tracking entries.
      * If there are no messages <code>null</code> is returned.
+     * @return An iterator with the messages or {@code null}
      */
-    Iterator<String> getMessages();
+    @CheckForNull Iterator<String> getMessages();
 
     /**
      * Dumps the process timer entries to the given writer, one entry per line.
+     * @param writer Writer to dump to
      */
-    void dump(PrintWriter writer);
+    void dump(@Nonnull PrintWriter writer);
 
     /**
      *  Call this when done processing the request - only the first call of this

@@ -21,10 +21,9 @@ package org.apache.sling.api.resource;
 import java.io.IOException;
 
 /**
- * This exception will be thrown during the try to persist
+ * This exception will be thrown during the commit to persist
  * changes to a {@link PersistableValueMap}, a
- * {@link ModifiableValueMap#update()} or
- * the {@link ResourceResolver}.
+ * {@link ModifiableValueMap} or the {@link ResourceResolver}.
  */
 public class PersistenceException extends IOException {
 
@@ -64,6 +63,8 @@ public class PersistenceException extends IOException {
      * Create a new persistence exception.
      * @param msg Exception message.
      * @param cause Exception cause.
+     * @param resourcePath The optional resource path
+     * @param propertyName The optional property name
      */
     public PersistenceException(final String msg,
                     final Throwable cause,
@@ -78,7 +79,7 @@ public class PersistenceException extends IOException {
     /**
      * Get the resource path related to this exception.
      * @return The resource path or <code>null</code>
-     * @since 2.2
+     * @since 2.2  (Sling API Bundle 2.2.0)
      */
     public String getResourcePath() {
         return this.resourcePath;
@@ -87,7 +88,7 @@ public class PersistenceException extends IOException {
     /**
      * Get the property name related to this exception.
      * @return The property name or <code>null</code>
-     * @since 2.2
+     * @since 2.2  (Sling API Bundle 2.2.0)
      */
     public String getPropertyName() {
         return this.propertyName;

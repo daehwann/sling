@@ -43,6 +43,7 @@ import org.apache.commons.lang.builder.CompareToBuilder;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Properties;
 import org.apache.felix.scr.annotations.Property;
+import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.sling.api.adapter.AdapterFactory;
 import org.apache.sling.commons.json.JSONArray;
@@ -58,6 +59,7 @@ import org.osgi.framework.Filter;
 import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.ServiceReference;
 import org.osgi.service.component.ComponentContext;
+import org.osgi.service.packageadmin.PackageAdmin;
 import org.osgi.util.tracker.ServiceTracker;
 import org.osgi.util.tracker.ServiceTrackerCustomizer;
 import org.slf4j.Logger;
@@ -70,7 +72,8 @@ import org.slf4j.LoggerFactory;
     @Property(name = "felix.webconsole.label", value = "adapters"),
     @Property(name = "felix.webconsole.title", value = "Sling Adapters"),
     @Property(name = "felix.webconsole.css", value = "/adapters/res/ui/adapters.css"),
-    @Property(name = "felix.webconsole.configprinter.modes", value = "always") })
+    @Property(name = "felix.webconsole.configprinter.modes", value = "always"),
+    @Property(name = "felix.webconsole.category", value = "Sling")})
 @SuppressWarnings("serial")
 public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrackerCustomizer, BundleListener {
 
@@ -78,10 +81,15 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
 
     private static final String ADAPTER_CONDITION = "adapter.condition";
 
+    private static final String ADAPTER_DEPRECATED = "adapter.deprecated";
+
     private final Logger logger = LoggerFactory.getLogger(AdapterWebConsolePlugin.class);
+    
+    @Reference
+    private PackageAdmin packageAdmin;
 
     private List<AdaptableDescription> allAdaptables;
-    private Map<Object, List<AdaptableDescription>> adapterServices;
+    private Map<ServiceReference, List<AdaptableDescription>> adapterServiceReferences;
     private Map<Bundle, List<AdaptableDescription>> adapterBundles;
 
     private ServiceTracker adapterTracker;
@@ -97,13 +105,14 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
     private void addServiceMetadata(final ServiceReference reference, final Object service) {
         final String[] adapters = PropertiesUtil.toStringArray(reference.getProperty(ADAPTER_CLASSES));
         final String condition = PropertiesUtil.toString(reference.getProperty(ADAPTER_CONDITION), null);
+        final boolean deprecated = PropertiesUtil.toBoolean(reference.getProperty(ADAPTER_DEPRECATED), false);
         final String[] adaptables = PropertiesUtil.toStringArray(reference.getProperty(ADAPTABLE_CLASSES));
         final List<AdaptableDescription> descriptions = new ArrayList<AdaptableDescription>(adaptables.length);
         for (final String adaptable : adaptables) {
-            descriptions.add(new AdaptableDescription(reference.getBundle(), adaptable, adapters, condition));
+            descriptions.add(new AdaptableDescription(reference.getBundle(), adaptable, adapters, condition, deprecated));
         }
         synchronized (this) {
-            adapterServices.put(service, descriptions);
+            adapterServiceReferences.put(reference, descriptions);
             update();
         }
     }
@@ -122,7 +131,7 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
 
     public void removedService(final ServiceReference reference, final Object service) {
         synchronized (this) {
-            adapterServices.remove(service);
+            adapterServiceReferences.remove(reference);
             update();
         }
     }
@@ -150,7 +159,7 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
                             } else {
                                 adapters = new String[] { value.toString() };
                             }
-                            descs.add(new AdaptableDescription(bundle, adaptableName, adapters, condition));
+                            descs.add(new AdaptableDescription(bundle, adaptableName, adapters, condition, false));
                         }
                     }
                 }
@@ -165,6 +174,8 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
             logger.error("Unable to load adapter descriptors for bundle " + bundle, e);
         } catch (final JSONException e) {
             logger.error("Unable to load adapter descriptors for bundle " + bundle, e);
+        } catch (IllegalStateException e) {
+            logger.debug("Unable to load adapter descriptors for bundle " + bundle);
         }
 
     }
@@ -186,7 +197,7 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
 
     private void update() {
         final List<AdaptableDescription> newList = new ArrayList<AdaptableDescription>();
-        for (final List<AdaptableDescription> descriptions : adapterServices.values()) {
+        for (final List<AdaptableDescription> descriptions : adapterServiceReferences.values()) {
             newList.addAll(descriptions);
         }
         for (final List<AdaptableDescription> list : adapterBundles.values()) {
@@ -198,7 +209,7 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
 
     protected void activate(final ComponentContext ctx) throws InvalidSyntaxException {
         this.bundleContext = ctx.getBundleContext();
-        this.adapterServices = new HashMap<Object, List<AdaptableDescription>>();
+        this.adapterServiceReferences = new HashMap<ServiceReference, List<AdaptableDescription>>();
         this.adapterBundles = new HashMap<Bundle, List<AdaptableDescription>>();
         for (final Bundle bundle : this.bundleContext.getBundles()) {
             if (bundle.getState() == Bundle.ACTIVE) {
@@ -215,7 +226,7 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
     protected void deactivate(final ComponentContext ctx) {
         this.bundleContext.removeBundleListener(this);
         this.adapterTracker.close();
-        this.adapterServices = null;
+        this.adapterServiceReferences = null;
         this.adapterBundles = null;
     }
 
@@ -259,13 +270,29 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
         writer.println("<p class=\"statline ui-state-highlight\">${How to Use This Information}</p>");
         writer.println("<p>${usage}</p>");
         writer.println("<table class=\"adapters nicetable\">");
-        writer.println("<thead><tr><th class=\"header\">${Adaptable Class}</th><th class=\"header\">${Adapter Class}</th><th class=\"header\">${Condition}</th><th class=\"header\">${Providing Bundle}</th></tr></thead>");
+        writer.println("<thead><tr><th class=\"header\">${Adaptable Class}</th><th class=\"header\">${Adapter Class}</th><th class=\"header\">${Condition}</th><th class=\"header\">${Deprecated}</th><th class=\"header\">${Providing Bundle}</th></tr></thead>");
         String rowClass = "odd";
         for (final AdaptableDescription desc : allAdaptables) {
-            writer.printf("<tr class=\"%s ui-state-default\"><td>%s</td>", rowClass, desc.adaptable);
+            writer.printf("<tr class=\"%s ui-state-default\"><td>", rowClass);
+            boolean packageExported = AdapterManagerImpl.checkPackage(packageAdmin, desc.adaptable);
+            if (!packageExported) {
+                writer.print("<span class='error'>");
+            }
+            writer.print(desc.adaptable);
+            if (!packageExported) {
+                writer.print("</span>");
+            }
+            writer.print("</td>");
             writer.print("<td>");
             for (final String adapter : desc.adapters) {
+                packageExported = AdapterManagerImpl.checkPackage(packageAdmin, adapter);
+                if (!packageExported) {
+                    writer.print("<span class='error'>");
+                }
                 writer.print(adapter);
+                if (!packageExported) {
+                    writer.print("</span>");
+                }
                 writer.print("<br/>");
             }
             writer.print("</td>");
@@ -273,6 +300,11 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
                 writer.print("<td>&nbsp;</td>");
             } else {
                 writer.printf("<td>%s</td>", desc.condition);
+            }
+            if (desc.deprecated) {
+                writer.print("<td>${Deprecated}</td>");
+            } else {
+                writer.print("<td></td>");
             }
             writer.printf("<td><a href=\"${pluginRoot}/../bundles/%s\">%s (%s)</a></td>", desc.bundle.getBundleId(),
                             desc.bundle.getSymbolicName(), desc.bundle.getBundleId());
@@ -320,19 +352,21 @@ public class AdapterWebConsolePlugin extends HttpServlet implements ServiceTrack
         private final String[] adapters;
         private final String condition;
         private final Bundle bundle;
+        private final boolean deprecated;
 
         public AdaptableDescription(final Bundle bundle, final String adaptable, final String[] adapters,
-                        final String condition) {
+                        final String condition, boolean deprecated) {
             this.adaptable = adaptable;
             this.adapters = adapters;
             this.condition = condition;
             this.bundle = bundle;
+            this.deprecated = deprecated;
         }
 
         @Override
         public String toString() {
             return "AdapterDescription [adaptable=" + this.adaptable + ", adapters=" + Arrays.toString(this.adapters)
-                            + ", condition=" + this.condition + ", bundle=" + this.bundle + "]";
+                            + ", condition=" + this.condition + ", bundle=" + this.bundle + ", deprecated= " + this.deprecated + "]";
         }
 
         public int compareTo(final AdaptableDescription o) {

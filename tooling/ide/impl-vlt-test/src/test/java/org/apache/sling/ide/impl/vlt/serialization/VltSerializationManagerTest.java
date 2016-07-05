@@ -19,12 +19,24 @@ package org.apache.sling.ide.impl.vlt.serialization;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertThat;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+import org.apache.commons.io.IOUtils;
+import org.junit.Assume;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 public class VltSerializationManagerTest {
 
     private VltSerializationManager serializationManager;
+
+    @Rule
+    public TemporaryFolder trash = new TemporaryFolder();
 
     @Before
     public void init() {
@@ -33,12 +45,96 @@ public class VltSerializationManagerTest {
 
     @Test
     public void getSerializationFilePath_Root() {
-        assertThat(serializationManager.getBaseResourcePath(".content.xml"), is(""));
+
+        File root = findFilesystemRoot();
+
+        assertThat(serializationManager.getBaseResourcePath(new File(root, ".content.xml").getAbsolutePath()),
+                is(root.getAbsolutePath()));
+    }
+
+    private File findFilesystemRoot() {
+        File[] roots = File.listRoots();
+        Assume.assumeTrue("No filesystem roots found", roots != null && roots.length > 0);
+        return roots[0];
     }
 
     @Test
     public void getSerializationFilePath_NestedPath() {
-        assertThat(serializationManager.getBaseResourcePath("/apps/sling/default/.content.xml"),
-                is("/apps/sling/default"));
+
+        File f = newFile(findFilesystemRoot(), "apps", "sling", "servlet", "default", ".content.xml");
+
+        assertThat(serializationManager.getBaseResourcePath(f.getAbsolutePath()), is(f.getParentFile()
+                .getAbsolutePath()));
+    }
+
+    private File newFile(File parent, String... segments) {
+
+        File current = parent;
+        for (String segment : segments) {
+            current = new File(current, segment);
+        }
+        return current;
+    }
+
+    @Test
+    public void getSerializationFilePath_FullCoverageAggerate() throws IOException {
+
+        File contentFile = trash.newFile("default.xml");
+        
+        try (InputStream in = getClass().getResourceAsStream("simple-content.xml"); 
+                FileOutputStream out = new FileOutputStream(contentFile);) {
+            IOUtils.copy(in, out);
+        }
+
+        assertThat(serializationManager.getBaseResourcePath(contentFile.getAbsolutePath()),
+                is(new File(contentFile.getParent(), "default").getAbsolutePath()));
+    }
+
+    @Test
+    public void getSerializationFilePath_XmlFile() throws IOException {
+
+        File contentFile = trash.newFile("file.xml");
+        
+        try (InputStream in = getClass().getResourceAsStream("file.xml");
+                FileOutputStream out = new FileOutputStream(contentFile)) {
+            IOUtils.copy(in, out);
+        }
+
+        assertThat(serializationManager.getBaseResourcePath(contentFile.getAbsolutePath()),
+                is(contentFile.getAbsolutePath()));
+    }
+
+    @Test
+    public void getOsPath_CleanName() {
+        assertThat(serializationManager.getOsPath("/content/test"), is("/content/test"));
+    }
+
+    @Test
+    public void getOsPath_MangledName() {
+        assertThat(serializationManager.getOsPath("/content/test/jcr:content"), is("/content/test/_jcr_content"));
+    }
+
+    @Test
+    public void getRepositoryPath_CleanName() {
+        assertThat(serializationManager.getRepositoryPath("/content/test"), is("/content/test"));
+    }
+
+    @Test
+    public void getRepositoryPath_MangledName() {
+        assertThat(serializationManager.getRepositoryPath("/content/test/_jcr_content"),
+                is("/content/test/jcr:content"));
+    }
+
+    @Test
+    public void getRepositoryPath_SerializationDir() {
+        assertThat(serializationManager.getRepositoryPath("/content/test.dir/file"), is("/content/test/file"));
+    }
+
+    @Test
+    public void getBaseResourcePath_MissingXmlFile() {
+        File f = newFile(findFilesystemRoot(), "apps", "sling", "servlet", "default", "config.xml");
+
+        assertThat(serializationManager.getBaseResourcePath(f.getAbsolutePath()),
+                is(f.getAbsolutePath().replace(".xml", "")));
     }
 }

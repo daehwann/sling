@@ -18,23 +18,34 @@ package org.apache.sling.ide.impl.resource.transport;
 
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.sling.ide.transport.Command;
+import org.apache.sling.ide.transport.CommandContext;
 import org.apache.sling.ide.transport.FileInfo;
+import org.apache.sling.ide.transport.NodeTypeRegistry;
+import org.apache.sling.ide.transport.Repository;
+import org.apache.sling.ide.transport.RepositoryInfo;
 import org.apache.sling.ide.transport.ResourceProxy;
+import org.apache.sling.ide.transport.Result;
 import org.apache.sling.ide.transport.TracingCommand;
 import org.osgi.service.event.EventAdmin;
 
-public class RepositoryImpl extends AbstractRepository{
+public class RepositoryImpl implements Repository {
 	
     private final HttpClient httpClient = new HttpClient();
-    private EventAdmin eventAdmin;
+    private final RepositoryInfo repositoryInfo;
+    private final EventAdmin eventAdmin;
+
+    public RepositoryImpl(RepositoryInfo repositoryInfo, EventAdmin eventAdmin) {
+        this.repositoryInfo = repositoryInfo;
+        this.eventAdmin = eventAdmin;
+    }
 
     private <T> Command<T> wrap(AbstractCommand<T> command) {
-        return new TracingCommand<T>(command, eventAdmin);
+        return new TracingCommand<>(command, eventAdmin);
     }
 
 	@Override
-	public Command<Void> newDeleteNodeCommand(final ResourceProxy resource) {
-        return wrap(new DeleteNodeCommand(resource, repositoryInfo, httpClient));
+    public Command<Void> newDeleteNodeCommand(final String path) {
+        return wrap(new DeleteNodeCommand(path, repositoryInfo, httpClient));
 	}
 	
 	@Override
@@ -54,19 +65,34 @@ public class RepositoryImpl extends AbstractRepository{
 	}
 	
 	@Override
-    public Command<Void> newAddOrUpdateNodeCommand(final FileInfo fileInfo, ResourceProxy resource) {
+    public Command<Void> newAddOrUpdateNodeCommand(CommandContext context, final FileInfo fileInfo, ResourceProxy resource,
+            CommandExecutionFlag... flags) {
+        if (flags.length != 0) {
+            throw new UnsupportedOperationException("This implementation does not support any flags");
+        }
 		
         return wrap(new UpdateContentCommand(repositoryInfo, httpClient, fileInfo.getRelativeLocation(),
                 resource.getProperties(), fileInfo));
 	}
 
-    public void bindEventAdmin(EventAdmin eventAdmin) {
-
-        this.eventAdmin = eventAdmin;
+    @Override
+    public Command<Void> newReorderChildNodesCommand(ResourceProxy resourceProxy) {
+        return wrap(new AbstractCommand<Void>(repositoryInfo, httpClient, resourceProxy.getPath()) {
+            @Override
+            public Result<Void> execute() {
+                // TODO - this is a no-op
+                return null;
+            }
+        });
     }
 
-    public void unbindEventAdmin(EventAdmin eventAdmin) {
-
-        this.eventAdmin = null;
+    @Override
+    public RepositoryInfo getRepositoryInfo() {
+        return repositoryInfo;
+    }
+    
+    @Override
+    public NodeTypeRegistry getNodeTypeRegistry() {
+        throw new IllegalStateException("not yet implemented");
     }
 }

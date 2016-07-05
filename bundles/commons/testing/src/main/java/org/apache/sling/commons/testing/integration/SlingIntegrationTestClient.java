@@ -22,8 +22,10 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.HttpException;
 import org.apache.commons.httpclient.methods.DeleteMethod;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.httpclient.methods.InputStreamRequestEntity;
@@ -37,9 +39,20 @@ import org.apache.commons.httpclient.methods.multipart.StringPart;
 /** Client functions to interact with Sling in integration tests */
 public class SlingIntegrationTestClient {
     private final HttpClient httpClient;
+    
+    /** Extension to use to check if a folder exists */
+    private String folderExistsTestExtension = ".txt";
 
     public SlingIntegrationTestClient(HttpClient client) {
         this.httpClient = client;
+    }
+    
+    public String getFolderExistsTestExtension() {
+        return folderExistsTestExtension;
+    }
+
+    public void setFolderExistsTestExtension(String folderExistsTestExtension) {
+        this.folderExistsTestExtension = folderExistsTestExtension;
     }
 
     /** Upload a file to the Sling repository
@@ -62,7 +75,7 @@ public class SlingIntegrationTestClient {
     /** Create the given directory via WebDAV, if needed, under given URL */
     public void mkdir(String url) throws IOException {
         int status = 0;
-        status = httpClient.executeMethod(new GetMethod(url + ".txt"));
+        status = httpClient.executeMethod(new GetMethod(url + folderExistsTestExtension));
         if(status != 200) {
             status = httpClient.executeMethod(new HttpAnyMethod("MKCOL",url));
             if(status!=201) {
@@ -88,7 +101,7 @@ public class SlingIntegrationTestClient {
         }
 
         final String url = baseUrl + path;
-        final int status = httpClient.executeMethod(new GetMethod(url + ".txt"));
+        final int status = httpClient.executeMethod(new GetMethod(url + folderExistsTestExtension));
         if(status!=200) {
             throw new HttpStatusCodeException(200, status, "GET", url);
         }
@@ -246,4 +259,20 @@ public class SlingIntegrationTestClient {
             throw new HttpStatusCodeException(expected, status, "POST", HttpTestBase.getResponseBodyAsStream(post, 0));
         }
     }
+    
+    public int post(String url, Map<String,String> properties) throws HttpException, IOException {
+        final PostMethod post = new PostMethod(url);
+        post.getParams().setContentCharset("UTF-8");
+        for(Entry<String, String> e : properties.entrySet()) {
+            post.addParameter(e.getKey(), e.getValue());
+        }
+        return httpClient.executeMethod(post);
+    }
+
+    public int get(String url) throws HttpException, IOException {
+        final GetMethod get = new GetMethod(url);
+        get.getParams().setContentCharset("UTF-8");
+        return httpClient.executeMethod(get);
+    }
+
 }

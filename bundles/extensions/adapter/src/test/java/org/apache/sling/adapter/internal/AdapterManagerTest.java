@@ -18,6 +18,7 @@
  */
 package org.apache.sling.adapter.internal;
 
+import org.apache.sling.adapter.Adaption;
 import org.apache.sling.adapter.mock.MockAdapterFactory;
 import org.apache.sling.api.adapter.AdapterFactory;
 import org.apache.sling.api.adapter.SlingAdaptable;
@@ -35,9 +36,13 @@ import org.osgi.framework.Filter;
 import org.osgi.framework.ServiceListener;
 import org.osgi.framework.ServiceReference;
 import org.osgi.service.component.ComponentContext;
+import org.osgi.service.packageadmin.ExportedPackage;
+import org.osgi.service.packageadmin.PackageAdmin;
 
+import java.util.Dictionary;
 import java.util.Map;
 
+import junitx.util.PrivateAccessor;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -50,8 +55,15 @@ public class AdapterManagerTest {
 
     protected final Mockery context = new JUnit4Mockery();
 
-    @org.junit.Before public void setUp() {
+    @org.junit.Before public void setUp() throws Exception {
         am = new AdapterManagerImpl();
+        final PackageAdmin pa = this.context.mock(PackageAdmin.class);
+        final ExportedPackage ep = this.context.mock(ExportedPackage.class);
+        this.context.checking(new Expectations(){{
+            allowing(pa).getExportedPackage(with(any(String.class)));
+            will(returnValue(ep));
+        }});
+        PrivateAccessor.setField(am, "packageAdmin", pa);
     }
 
     @org.junit.After public void tearDown() {
@@ -88,6 +100,8 @@ public class AdapterManagerTest {
             allowing(bundleCtx).getServiceReferences(with(any(String.class)), with(any(String.class)));
             will(returnValue(null));
             allowing(bundleCtx).removeServiceListener(with(any(ServiceListener.class)));
+            allowing(bundleCtx).registerService(with(Adaption.class.getName()), with(AdaptionImpl.INSTANCE), with(any(Dictionary.class)));
+            will(returnValue(null));
         }});
         return ctx;
     }
@@ -112,11 +126,13 @@ public class AdapterManagerTest {
             allowing(bundleCtx).getServiceReferences(with(any(String.class)), with(any(String.class)));
             will(returnValue(null));
             allowing(bundleCtx).removeServiceListener(with(any(ServiceListener.class)));
+            allowing(bundleCtx).registerService(with(Adaption.class.getName()), with(AdaptionImpl.INSTANCE), with(any(Dictionary.class)));
+            will(returnValue(null));
         }});
         return ctx;
     }
 
-    public static <T> Matcher<T> any(@SuppressWarnings("unused") Class<T> type) {
+    public static <T> Matcher<T> any(Class<T> type) {
         return new IsAnything<T>();
     }
 
@@ -477,6 +493,7 @@ public class AdapterManagerTest {
 
     public class FirstImplementationAdapterFactory implements AdapterFactory {
 
+        @SuppressWarnings("unchecked")
         public <AdapterType> AdapterType getAdapter(Object adaptable, Class<AdapterType> type) {
             if (adaptable instanceof AdapterObject) {
                 AdapterObject adapterObject = (AdapterObject) adaptable;
@@ -494,6 +511,7 @@ public class AdapterManagerTest {
 
     public class SecondImplementationAdapterFactory implements AdapterFactory {
 
+        @SuppressWarnings("unchecked")
         public <AdapterType> AdapterType getAdapter(Object adaptable, Class<AdapterType> type) {
             if (adaptable instanceof AdapterObject) {
                 AdapterObject adapterObject = (AdapterObject) adaptable;

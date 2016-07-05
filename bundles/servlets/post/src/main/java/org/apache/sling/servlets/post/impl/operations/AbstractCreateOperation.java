@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -30,7 +31,6 @@ import javax.jcr.Node;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.nodetype.NodeType;
-import javax.servlet.ServletException;
 
 import org.apache.sling.api.SlingHttpServletRequest;
 import org.apache.sling.api.request.RequestParameter;
@@ -51,6 +51,8 @@ import org.apache.sling.servlets.post.impl.helper.DefaultNodeNameGenerator;
 import org.apache.sling.servlets.post.impl.helper.RequestProperty;
 
 abstract class AbstractCreateOperation extends AbstractPostOperation {
+    private final Random randomCollisionIndex = new Random();
+
     /**
      * The default node name generator
      */
@@ -99,9 +101,9 @@ abstract class AbstractCreateOperation extends AbstractPostOperation {
     throws PersistenceException, RepositoryException {
 
         final String path = response.getPath();
+        final Resource resource = resolver.getResource(path);
 
-        if ( resolver.getResource(path) == null ) {
-
+        if ( resource == null || ResourceUtil.isSyntheticResource(resource) ) {
             deepGetOrCreateNode(resolver, path, reqProperties, changes, versioningConfiguration);
             response.setCreateRequest(true);
 
@@ -520,16 +522,19 @@ abstract class AbstractCreateOperation extends AbstractPostOperation {
                 if (startingResource == null){
                 	throw new PersistenceException("Access denied for root resource, resource can't be created: " + path);
                 }
-            } else if (resolver.getResource(startingResourcePath) != null) {
-                startingResource = resolver.getResource(startingResourcePath);
-                updateNodeType(resolver, startingResourcePath, reqProperties, changes, versioningConfiguration);
-                updateMixins(resolver, startingResourcePath, reqProperties, changes, versioningConfiguration);
             } else {
-                int pos = startingResourcePath.lastIndexOf('/');
-                if (pos > 0) {
-                    startingResourcePath = startingResourcePath.substring(0, pos);
+                final Resource r = resolver.getResource(startingResourcePath);
+                if ( r != null && !ResourceUtil.isSyntheticResource(r)) {
+                    startingResource = resolver.getResource(startingResourcePath);
+                    updateNodeType(resolver, startingResourcePath, reqProperties, changes, versioningConfiguration);
+                    updateMixins(resolver, startingResourcePath, reqProperties, changes, versioningConfiguration);
                 } else {
-                    startingResourcePath = "/";
+                    int pos = startingResourcePath.lastIndexOf('/');
+                    if (pos > 0) {
+                        startingResourcePath = startingResourcePath.substring(0, pos);
+                    } else {
+                        startingResourcePath = "/";
+                    }
                 }
             }
         }
@@ -549,8 +554,9 @@ abstract class AbstractCreateOperation extends AbstractPostOperation {
             // although the resource should not exist (according to the first test
             // above)
             // we do a sanety check.
-            if (resource.getChild(name) != null) {
-                resource = resource.getChild(name);
+            final Resource child = resource.getChild(name);
+            if (child != null && !ResourceUtil.isSyntheticResource(child)) {
+                resource = child;
                 updateNodeType(resolver, resource.getPath(), reqProperties, changes, versioningConfiguration);
                 updateMixins(resolver, resource.getPath(), reqProperties, changes, versioningConfiguration);
             } else {
@@ -666,34 +672,38 @@ abstract class AbstractCreateOperation extends AbstractPostOperation {
 		return basePath;
     }
 
+    /** Generate a unique path in case the node name generator didn't */
     private String ensureUniquePath(SlingHttpServletRequest request, String basePath) throws RepositoryException {
 		// if resulting path exists, add a suffix until it's not the case
 		// anymore
 		final Session session = request.getResourceResolver().adaptTo(Session.class);
         final ResourceResolver resolver = request.getResourceResolver();
 
-		String jcrPath = removeAndValidateWorkspace(basePath, session);
+        // basePath might contain a workspace prefix, need to remove it
+        // to test for existence
+        String jcrPath = removeAndValidateWorkspace(basePath, session);
 
-		// if resulting path exists, add a suffix until it's not the case
+		// if resulting path exists, add a random suffix until it's not the case
 		// anymore
+		final int MAX_TRIES = 1000;
 		if (resolver.getResource(jcrPath) != null ) {
-		    for (int idx = 0; idx < 1000; idx++) {
-		        String newPath = jcrPath + "_" + idx;
+		    for(int i=0; i < MAX_TRIES; i++) {
+		        final int uniqueIndex = Math.abs(randomCollisionIndex.nextInt());
+		        String newPath = jcrPath + "_" + uniqueIndex;
 		        if (resolver.getResource(newPath) == null) {
-		            basePath = basePath + "_" + idx;
+		            basePath = basePath + "_" + uniqueIndex;
 		            jcrPath = newPath;
 		            break;
 		        }
 		    }
-	        // if it still exists there are more than 1000 nodes ?
+
+	        // Give up after MAX_TRIES
 	        if (resolver.getResource(jcrPath) != null ) {
 	            throw new RepositoryException(
-	                "Collision in generated node names for path=" + basePath);
+	                "Collision in generated node names under " + basePath + ", generated path " + jcrPath + " already exists");
 	        }
 		}
 
-
 		return basePath;
     }
-
 }

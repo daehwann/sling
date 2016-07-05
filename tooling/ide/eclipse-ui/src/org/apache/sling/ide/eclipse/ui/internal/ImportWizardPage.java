@@ -16,11 +16,10 @@
  */
 package org.apache.sling.ide.eclipse.ui.internal;
 
-import java.io.File;
-import java.util.List;
 
 import org.apache.sling.ide.eclipse.core.ProjectUtil;
-import org.apache.sling.ide.filter.FilterLocator;
+import org.apache.sling.ide.eclipse.core.internal.ProjectHelper;
+import org.apache.sling.ide.eclipse.ui.propertyPages.SlingProjectPropertyPage;
 import org.eclipse.core.resources.IContainer;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
@@ -30,8 +29,6 @@ import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.NullProgressMonitor;
-import org.eclipse.core.runtime.Path;
-import org.eclipse.jface.preference.PreferenceDialog;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.SelectionAdapter;
@@ -41,7 +38,6 @@ import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.layout.RowLayout;
 import org.eclipse.swt.widgets.Button;
-import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Label;
@@ -49,22 +45,22 @@ import org.eclipse.swt.widgets.Link;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.dialogs.ContainerSelectionDialog;
 import org.eclipse.ui.dialogs.ISelectionValidator;
-import org.eclipse.ui.dialogs.PreferencesUtil;
 import org.eclipse.ui.dialogs.WizardDataTransferPage;
 import org.eclipse.wst.server.core.IServer;
-import org.eclipse.wst.server.core.ServerCore;
 
 /**
  * Wizard page for importing content from Sling Repositories.
  */
 public class ImportWizardPage extends WizardDataTransferPage {
 
-    private Combo repositoryCombo;
+    private SlingLaunchpadCombo repositoryCombo;
     private Label importLabel;
 	private Button containerBrowseButton;
-	private IProject project;
+    private IProject project;
 	private Text containerNameField;
 	private Label adjustJcrRootText;
+    private IFolder importRoot;
+    private Composite adjustComposite;
 
 	/**
 	 * Creates an import wizard page for importing from a Sling Repository. If
@@ -80,16 +76,27 @@ public class ImportWizardPage extends WizardDataTransferPage {
 	public ImportWizardPage(String pageName, IStructuredSelection selection) {
 		super(pageName);
 		setTitle(pageName); // NON-NLS-1
-		setDescription("Import content from a Sling Repository into the workspace"); // NON-NLS-1
+        setDescription("Import content from a Repository into the workspace"); // NON-NLS-1
 
-		if (selection!=null && selection.getFirstElement()!=null && (selection.getFirstElement() instanceof IProject)) {
-			this.project = (IProject) selection.getFirstElement();
-		}
+        Object selectedResource = selection.getFirstElement();
+        if (selectedResource instanceof IProject) {
+            importRoot = ProjectUtil.getSyncDirectory((IProject) selectedResource);
+        } else if (selectedResource instanceof IFile) {
+            // the selection dialog does not support files, so we force this to be the parent folder
+            // also, since the content sync root must be a folder, the parent must be a folder, can't
+            // be a project
+            importRoot = (IFolder) ((IFile) selectedResource).getParent();
+        } else if (selectedResource instanceof IFolder) {
+            importRoot = (IFolder) selectedResource;
+        }
+
+        if (importRoot != null) {
+            project = importRoot.getProject();
+        }
 	}
 	
-    IPath getResourcePath() {
-        String resourcePath = project.getFullPath().append(ProjectUtil.getSyncDirectoryValue(project)).toOSString();
-    	return new Path(resourcePath);
+    public IResource getResource() {
+        return importRoot;
 	}
 
 	/*
@@ -132,9 +139,8 @@ public class ImportWizardPage extends WizardDataTransferPage {
 
         new Label(container, SWT.NONE).setText("Repository: ");
 
-        repositoryCombo = new Combo(container, SWT.DROP_DOWN);
-        repositoryCombo.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, false));
-        repositoryCombo.addSelectionListener(new SelectionListener() {
+        repositoryCombo = new SlingLaunchpadCombo(container, project);
+        repositoryCombo.getWidget().addSelectionListener(new SelectionListener() {
 			
 			@Override
 			public void widgetSelected(SelectionEvent e) {
@@ -148,7 +154,7 @@ public class ImportWizardPage extends WizardDataTransferPage {
 	            updateWidgetEnablements();
 			}
 		});
-        updateRepositoryList();
+        repositoryCombo.refreshRepositoryList(new NullProgressMonitor());
 
         Composite containerGroup = new Composite(composite, SWT.NONE);
         GridLayout layout = new GridLayout();
@@ -171,20 +177,20 @@ public class ImportWizardPage extends WizardDataTransferPage {
         containerNameField.setFont(composite.getFont());
 
         containerBrowseButton = new Button(containerGroup, SWT.PUSH);
-        containerBrowseButton.setText("Select Project...");
+        containerBrowseButton.setText("Select location...");
         containerBrowseButton.setLayoutData(new GridData(
                 GridData.HORIZONTAL_ALIGN_FILL));
         containerBrowseButton.addListener(SWT.Selection, this);
         containerBrowseButton.setFont(composite.getFont());
         setButtonLayoutData(containerBrowseButton);
         
-        if (project!=null) {
-        	containerNameField.setText(project.getName());
+        if (importRoot != null) {
+            containerNameField.setText(importRoot.getFullPath().toPortableString());
         } else {
-        	setErrorMessage("Select a project first");
+            setErrorMessage("Select an import location");
         }
         
-        Composite adjustComposite = new Composite(composite, SWT.NONE);
+        adjustComposite = new Composite(composite, SWT.NONE);
         adjustComposite.setLayout(new RowLayout());
 
         adjustJcrRootText = new Label(adjustComposite, SWT.NONE);
@@ -195,10 +201,8 @@ public class ImportWizardPage extends WizardDataTransferPage {
         openPropertiesLink.setText("(<a>change</a>)");
         openPropertiesLink.addSelectionListener(new SelectionAdapter() {
 			public void widgetSelected(SelectionEvent e) {
-				PreferenceDialog dialog = PreferencesUtil.createPropertyDialogOn(getShell(), project, 
-						"org.apache.sling.ide.projectPropertyPage", 
-						new String[] {"org.apache.sling.ide.projectPropertyPage"}, null);
-				dialog.open();
+
+                SlingProjectPropertyPage.openPropertyDialog(getShell(), project);
 				updateWidgetEnablements();
 			}
 		});
@@ -210,31 +214,16 @@ public class ImportWizardPage extends WizardDataTransferPage {
         updateWidgetEnablements();
 	}
 
-	private void updateRepositoryList() {
-		repositoryCombo.removeAll();
-		List<IServer> servers = SelectionUtils.getServersLinkedToProject(project, new NullProgressMonitor());
-        if (servers.size() > 1) {
-            repositoryCombo.add(""); // force selection only if there is more than one server
-        }
-        for (IServer server : servers) {
-            repositoryCombo.add(server.getId());
-        }
-
-        if (servers.size() == 1) {
-            repositoryCombo.select(0);
-        }
-	}
-
-
 	public void handleEvent(Event event) {
 		if (event.widget == containerBrowseButton) {
 			handleContainerBrowseButtonPressed();
 		}
 		
+        updateWidgetEnablements();
 		determinePageCompletion();
 	}
 
-    protected IPath queryForProject(IProject initialSelection, String msg,
+    protected IPath queryForLocation(IProject initialSelection, String msg,
             String title) {
         ContainerSelectionDialog dialog = new ContainerSelectionDialog(
                 getControl().getShell(), initialSelection,
@@ -248,16 +237,24 @@ public class ImportWizardPage extends WizardDataTransferPage {
 			@Override
 			public String isValid(Object selection) {
 				if (!(selection instanceof IPath)) {
-					return "You must select a project";
+                    return "Please select a valid import location";
 				} 
 				IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
-		        IContainer container = (IContainer) root
-		                .findMember((IPath) selection);
+                IContainer container = (IContainer) root.findMember((IPath) selection);
 				if (container instanceof IProject) {
-					return null;
-				} else {
-					return "You must select a project";
+					return "Please select a folder inside the project";
 				}
+				
+                if (!ProjectHelper.isContentProject(container.getProject())) {
+                    return "Project " + container.getProject().getName() + " is not a content project";
+                }
+
+				if ( ! ProjectUtil.isInsideContentSyncRoot(container) ) {
+                    return "Please select a folder inside the content sync root folder "
+                            + ProjectUtil.getSyncDirectory(container.getProject()).getProjectRelativePath();
+				}
+				
+                return null;
 			}
 		});
         dialog.open();
@@ -269,23 +266,21 @@ public class ImportWizardPage extends WizardDataTransferPage {
     }
 
     private void handleContainerBrowseButtonPressed() {
-    	IPath result = queryForProject(project, "Select a project to import data to", "Select project");
+        IPath result = queryForLocation(project, "Select a location to import data to", "Select location");
     	if (result!=null) {
 			IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
-	        project = root
-	                .findMember(result).getProject();
+            importRoot = (IFolder) root.findMember(result);
+            project = importRoot.getProject();
 	        
-        	containerNameField.setText(project.getName());
-        	updateRepositoryList();
+            containerNameField.setText(importRoot.getFullPath().toPortableString());
+            repositoryCombo.setProject(project);
+            repositoryCombo.refreshRepositoryList(new NullProgressMonitor());
     	}
 	}
 
 	public IServer getServer() {
-        for (IServer server : ServerCore.getServers())
-            if (server.getId().equals(repositoryCombo.getText()))
-                return server;
 
-        return null;
+        return repositoryCombo.getServer();
     }
 
 	/*
@@ -299,20 +294,12 @@ public class ImportWizardPage extends WizardDataTransferPage {
 			// still under construction
 			return true;
 		}
-        if (this.repositoryCombo == null || this.repositoryCombo.getSelectionIndex() == -1) {
-            setErrorMessage("Please select a valid index");
+
+        if (this.repositoryCombo == null || this.repositoryCombo.getServer() == null) {
+            setErrorMessage("Please select a server instance");
 			return false;
 		}
 
-        String syncDirectoryPath = ProjectUtil.getSyncDirectoryValue(project);
-        IFolder syncFolder = project.getFolder(syncDirectoryPath);
-
-        if (!syncFolder.getFullPath().isPrefixOf(getResourcePath())) {
-            setErrorMessage("The destination directory must be " + syncFolder.getFullPath().toPortableString()
-                    + " or one of its descendants.");
-			return false;
-		}
-		
 		return true;
 	}
 
@@ -331,43 +318,29 @@ public class ImportWizardPage extends WizardDataTransferPage {
             return;
         }
 
-        IResource syncLocation = project.getWorkspace().getRoot().findMember(getResourcePath());
-        // error message will be displayed, no need for the info label
-        if (syncLocation == null) {
-            importLabel.setVisible(false);
-            importLabel.getParent().layout();
-            return;
-        }
+        adjustComposite.setVisible(project != null);
+        adjustComposite.getParent().layout();
 
-        IFile filterFile = getFilter(syncLocation);
+        if (importRoot != null) {
+            IFile filterFile = getFilter();
 
-        if (filterFile!=null && filterFile.exists()) {
-            importLabel.setText("Will apply import filter from /" + filterFile.getProjectRelativePath() + ".");
-        } else {
-            importLabel.setText("No filter definition found, will import all resources.");
+            if (filterFile != null && filterFile.exists()) {
+                importLabel.setText("Will apply import filter from /" + filterFile.getProjectRelativePath() + ".");
+            } else {
+                importLabel.setText("No filter definition found, will import all resources.");
+            }
+            importLabel.setVisible(true);
         }
-        importLabel.setVisible(true);
+        importLabel.setVisible(importRoot != null);
         importLabel.getParent().layout();
     }
 
-	public IFile getFilterFile() {
+    private IFile getFilter() {
 
-        IResource syncLocation = project.getWorkspace().getRoot().findMember(getResourcePath());
-        if (syncLocation == null) {
+        IPath filterPath = ProjectUtil.findFilterPath(project);
+        if (filterPath == null) {
             return null;
         }
-
-        return getFilter(syncLocation);
-    }
-
-    private IFile getFilter(IResource syncLocation) {
-
-        FilterLocator filterLocator = Activator.getDefault().getFilterLocator();
-        File filterLocation = filterLocator.findFilterLocation(syncLocation.getLocation().toFile());
-        if (filterLocation == null) {
-            return null;
-        }
-        IPath filterPath = Path.fromOSString(filterLocation.getAbsolutePath());
         return ResourcesPlugin.getWorkspace().getRoot().getFileForLocation(filterPath);
     }
 
@@ -382,23 +355,29 @@ public class ImportWizardPage extends WizardDataTransferPage {
 			// still under construction
 			return true;
 		}
-        if (project!=null && adjustJcrRootText!=null) {
+        if (adjustJcrRootText != null) {
             adjustJcrRootText();
             adjustJcrRootText.getParent().pack();
         }
-        if (repositoryCombo.getItemCount() == 0 && project != null) {
-        	setErrorMessage("The selected project is not configured with/added to any Sling server");
-        	return false;
+
+        if (project == null || importRoot == null) {
+            setErrorMessage("Please select a location to import to");
+            return false;
         }
-        if ((repositoryCombo.getSelectionIndex() == -1) || 
-        	(repositoryCombo.getText().length() == 0)) {
-        	setErrorMessage("Please select a repository");
-        	return false;
+
+        String repositoryError = repositoryCombo.getErrorMessage();
+        if (repositoryError != null) {
+            setErrorMessage(repositoryError);
+            return false;
         }
-		return true;
+
+        return true;
 	}
 
 	private void adjustJcrRootText() {
-		adjustJcrRootText.setText("Content will be stored under: "+project.getName()+"/"+ProjectUtil.getSyncDirectoryValue(project));
+        if (project != null) {
+            adjustJcrRootText.setText("Content sync root is: " + project.getName() + "/"
+                    + ProjectUtil.getSyncDirectoryValue(project));
+        }
 	}
 }

@@ -19,22 +19,25 @@ package org.apache.sling.models.impl;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import java.util.Collections;
+import java.util.Hashtable;
 
 import org.apache.sling.api.SlingHttpServletRequest;
+import org.apache.sling.models.factory.ModelClassException;
 import org.apache.sling.models.impl.injectors.RequestAttributeInjector;
+import org.apache.sling.models.impl.injectors.SelfInjector;
 import org.apache.sling.models.testmodels.classes.InvalidConstructorModel;
 import org.apache.sling.models.testmodels.classes.SuperclassConstructorModel;
 import org.apache.sling.models.testmodels.classes.WithOneConstructorModel;
 import org.apache.sling.models.testmodels.classes.WithThreeConstructorsModel;
 import org.apache.sling.models.testmodels.classes.WithTwoConstructorsModel;
+import org.apache.sling.models.testmodels.classes.constructorinjection.NoNameModel;
+import org.apache.sling.models.testmodels.classes.constructorinjection.WithThreeConstructorsOneInjectModel;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.Constants;
 import org.osgi.service.component.ComponentContext;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -51,16 +54,23 @@ public class ConstructorTest {
     @Mock
     private SlingHttpServletRequest request;
 
+    private static final int INT_VALUE = 42;
+
+    private static final String STRING_VALUE = "myValue";
+
     @Before
     public void setup() {
         when(componentCtx.getBundleContext()).thenReturn(bundleContext);
+        when(componentCtx.getProperties()).thenReturn(new Hashtable<String, Object>());
 
-        when(request.getAttribute("attribute")).thenReturn(42);
+        when(request.getAttribute("attribute")).thenReturn(INT_VALUE);
+        when(request.getAttribute("attribute2")).thenReturn(STRING_VALUE);
 
         factory = new ModelAdapterFactory();
         factory.activate(componentCtx);
-        factory.bindInjector(new RequestAttributeInjector(),
-                Collections.<String, Object> singletonMap(Constants.SERVICE_ID, 0L));
+        factory.bindInjector(new RequestAttributeInjector(), new ServicePropertiesMap(1, 1));
+        factory.bindInjector(new SelfInjector(), new ServicePropertiesMap(2, 2));
+        factory.adapterImplementations.addClassesAsAdapterAndImplementation(WithOneConstructorModel.class, WithThreeConstructorsModel.class, WithTwoConstructorsModel.class, SuperclassConstructorModel.class, InvalidConstructorModel.class, WithThreeConstructorsOneInjectModel.class, NoNameModel.class);
     }
 
     @Test
@@ -68,7 +78,7 @@ public class ConstructorTest {
         WithOneConstructorModel model = factory.getAdapter(request, WithOneConstructorModel.class);
         assertNotNull(model);
         assertEquals(request, model.getRequest());
-        assertEquals(42, model.getAttribute());
+        assertEquals(INT_VALUE, model.getAttribute());
     }
 
     @Test
@@ -76,7 +86,7 @@ public class ConstructorTest {
         WithThreeConstructorsModel model = factory.getAdapter(request, WithThreeConstructorsModel.class);
         assertNotNull(model);
         assertEquals(request, model.getRequest());
-        assertEquals(42, model.getAttribute());
+        assertEquals(INT_VALUE, model.getAttribute());
     }
 
     @Test
@@ -84,7 +94,7 @@ public class ConstructorTest {
         WithTwoConstructorsModel model = factory.getAdapter(request, WithTwoConstructorsModel.class);
         assertNotNull(model);
         assertEquals(request, model.getRequest());
-        assertEquals(42, model.getAttribute());
+        assertEquals(INT_VALUE, model.getAttribute());
     }
 
     @Test
@@ -92,7 +102,7 @@ public class ConstructorTest {
         SuperclassConstructorModel model = factory.getAdapter(request, SuperclassConstructorModel.class);
         assertNotNull(model);
         assertEquals(request, model.getRequest());
-        assertEquals(42, model.getAttribute());
+        assertEquals(INT_VALUE, model.getAttribute());
     }
 
     @Test
@@ -101,4 +111,28 @@ public class ConstructorTest {
         assertNull(model);
     }
 
+    @Test(expected = ModelClassException.class)
+    public void testInvalidConstructorInjectorException() {
+        factory.createModel(request, InvalidConstructorModel.class);
+    }
+
+    /**
+     * Test model object with three constructors, and make sure that one with @Inject is picked for instantiation.
+     * Test mixing of constructor injection and field injection as well.
+     */
+    @Test
+    public void testThreeConstructorsOneInjectInjection() {
+        WithThreeConstructorsOneInjectModel model = factory.getAdapter(request,
+                WithThreeConstructorsOneInjectModel.class);
+        assertNotNull(model);
+        assertNull(model.getRequest());
+        assertEquals(INT_VALUE, model.getAttribute());
+        assertEquals(STRING_VALUE, model.getAttribute2());
+    }
+
+    @Test
+    public void testNoNameModel() {
+        NoNameModel model = factory.getAdapter(request, NoNameModel.class);
+        assertNull(model);
+    }
 }

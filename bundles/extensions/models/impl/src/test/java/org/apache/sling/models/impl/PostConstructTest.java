@@ -16,11 +16,18 @@
  */
 package org.apache.sling.models.impl;
 
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.when;
+
+import java.util.Hashtable;
 
 import org.apache.sling.api.resource.Resource;
+import org.apache.sling.models.factory.PostConstructException;
+import org.apache.sling.models.testmodels.classes.FailingPostConstuctModel;
 import org.apache.sling.models.testmodels.classes.SubClass;
+import org.apache.sling.models.testmodels.classes.SubClassOverriddenPostConstruct;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -38,20 +45,50 @@ public class PostConstructTest {
     @Mock
     private BundleContext bundleContext;
 
+    @Mock
+    private Resource resource;
+
+    ModelAdapterFactory factory = new ModelAdapterFactory();
+
     @Before
     public void setup() {
         when(componentCtx.getBundleContext()).thenReturn(bundleContext);
+        when(componentCtx.getProperties()).thenReturn(new Hashtable<String, Object>());
+        factory.activate(componentCtx);
+        // no injectors are necessary
+        factory.adapterImplementations.addClassesAsAdapterAndImplementation(SubClass.class, SubClassOverriddenPostConstruct.class, FailingPostConstuctModel.class);
     }
 
     @Test
     public void testClassOrder() {
-        Resource r = mock(Resource.class);
-        ModelAdapterFactory factory = new ModelAdapterFactory();
-        factory.activate(componentCtx);
-        // no injectors are necessary
-        
-        SubClass sc = factory.getAdapter(r, SubClass.class);
+        SubClass sc = factory.getAdapter(resource, SubClass.class);
         assertTrue(sc.getPostConstructCalledTimestampInSub() > sc.getPostConstructCalledTimestampInSuper());
         assertTrue(sc.getPostConstructCalledTimestampInSuper() > 0);
+    }
+
+    @Test
+    public void testOverriddenPostConstruct() {
+        SubClassOverriddenPostConstruct sc = factory.getAdapter(resource, SubClassOverriddenPostConstruct.class);
+        assertEquals("Post construct not called exactly one time in sub class!", 1, sc.getPostConstructorCalledCounter());
+        assertEquals("Post construct was called on super class although overridden in sub class", 0, sc.getPostConstructCalledTimestampInSuper());
+    }
+
+    @Test
+    public void testPostConstructMethodWhichThrowsException() {
+        FailingPostConstuctModel model = factory.getAdapter(resource, FailingPostConstuctModel.class);
+        assertNull(model);
+    }
+
+    @Test
+    public void testPostConstructMethodWhichThrowsExceptionThrowingException() {
+        boolean thrown = false;
+        try {
+            factory.createModel(resource, FailingPostConstuctModel.class);
+        } catch (PostConstructException e) {
+            assertTrue(e.getMessage().contains("Post-construct"));
+            assertEquals("FAIL", e.getCause().getMessage());
+            thrown = true;
+        }
+        assertTrue(thrown);
     }
 }

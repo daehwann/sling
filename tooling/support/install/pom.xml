@@ -23,12 +23,12 @@
     <parent>
         <groupId>org.apache.sling</groupId>
         <artifactId>sling</artifactId>
-        <version>17</version>
+        <version>26</version>
     </parent>
 
     <groupId>org.apache.sling</groupId>
     <artifactId>org.apache.sling.tooling.support.install</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.3-SNAPSHOT</version>
     <packaging>bundle</packaging>
 
     <name>Apache Sling Tooling Support Install</name>

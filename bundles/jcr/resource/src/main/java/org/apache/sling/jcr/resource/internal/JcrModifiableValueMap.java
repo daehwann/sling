@@ -18,36 +18,25 @@
  */
 package org.apache.sling.jcr.resource.internal;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.Serializable;
-import java.lang.reflect.Array;
-import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import javax.jcr.Node;
 import javax.jcr.Property;
 import javax.jcr.PropertyIterator;
-import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
-import javax.jcr.ValueFormatException;
 
 import org.apache.jackrabbit.util.ISO9075;
 import org.apache.jackrabbit.util.Text;
 import org.apache.sling.api.resource.ModifiableValueMap;
 import org.apache.sling.jcr.resource.internal.helper.JcrPropertyMapCacheEntry;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * This implementation of the value map allows to change
@@ -57,9 +46,6 @@ import org.slf4j.LoggerFactory;
  */
 public final class JcrModifiableValueMap
     implements ModifiableValueMap {
-
-    /** Default logger */
-    private static Logger LOGGER = LoggerFactory.getLogger(JcrModifiableValueMap.class);
 
     /** The underlying node. */
     private final Node node;
@@ -73,29 +59,19 @@ public final class JcrModifiableValueMap
     /** Has the node been read completely? */
     private boolean fullyRead;
 
-    /** keep all prefixes for escaping */
-    private String[] namespacePrefixes;
-
-    private final ClassLoader dynamicClassLoader;
+    private final HelperData helper;
 
     /**
      * Constructor
      * @param node The underlying node.
-     * @param dynamicCL Dynamic class loader for loading serialized objects.
+     * @param helper Helper data object
      */
-    public JcrModifiableValueMap(final Node node, final ClassLoader dynamicCL) {
+    public JcrModifiableValueMap(final Node node, final HelperData helper) {
         this.node = node;
         this.cache = new LinkedHashMap<String, JcrPropertyMapCacheEntry>();
         this.valueCache = new LinkedHashMap<String, Object>();
         this.fullyRead = false;
-        this.dynamicClassLoader = dynamicCL;
-    }
-
-    /**
-     * Get the node.
-     */
-    private Node getNode() {
-        return node;
+        this.helper = helper;
     }
 
     // ---------- ValueMap
@@ -113,6 +89,7 @@ public final class JcrModifiableValueMap
     /**
      * @see org.apache.sling.api.resource.ValueMap#get(java.lang.String, java.lang.Class)
      */
+    @Override
     @SuppressWarnings("unchecked")
     public <T> T get(final String aKey, final Class<T> type) {
         final String key = checkKey(aKey);
@@ -124,12 +101,13 @@ public final class JcrModifiableValueMap
         if ( entry == null ) {
             return null;
         }
-        return convertToType(entry, type);
+        return entry.convertToType(type, node, helper.getDynamicClassLoader());
     }
 
     /**
      * @see org.apache.sling.api.resource.ValueMap#get(java.lang.String, java.lang.Object)
      */
+    @Override
     @SuppressWarnings("unchecked")
     public <T> T get(final String aKey,final T defaultValue) {
         final String key = checkKey(aKey);
@@ -154,16 +132,18 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#get(java.lang.Object)
      */
+    @Override
     public Object get(final Object aKey) {
         final String key = checkKey(aKey.toString());
         final JcrPropertyMapCacheEntry entry = this.read(key);
-        final Object value = (entry == null ? null : entry.getDefaultValueOrNull());
+        final Object value = (entry == null ? null : entry.getPropertyValueOrNull());
         return value;
     }
 
     /**
      * @see java.util.Map#containsKey(java.lang.Object)
      */
+    @Override
     public boolean containsKey(final Object key) {
         return get(key) != null;
     }
@@ -171,6 +151,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#containsValue(java.lang.Object)
      */
+    @Override
     public boolean containsValue(final Object value) {
         readFully();
         return valueCache.containsValue(value);
@@ -179,6 +160,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#isEmpty()
      */
+    @Override
     public boolean isEmpty() {
         return size() == 0;
     }
@@ -186,6 +168,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#size()
      */
+    @Override
     public int size() {
         readFully();
         return cache.size();
@@ -194,6 +177,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#entrySet()
      */
+    @Override
     public Set<java.util.Map.Entry<String, Object>> entrySet() {
         readFully();
         final Map<String, Object> sourceMap;
@@ -208,6 +192,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#keySet()
      */
+    @Override
     public Set<String> keySet() {
         readFully();
         return Collections.unmodifiableSet(cache.keySet());
@@ -216,6 +201,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#values()
      */
+    @Override
     public Collection<Object> values() {
         readFully();
         final Map<String, Object> sourceMap;
@@ -230,6 +216,7 @@ public final class JcrModifiableValueMap
     /**
      * Return the path of the current node.
      *
+     * @return the path
      * @throws IllegalStateException If a repository exception occurs
      */
     public String getPath() {
@@ -269,9 +256,9 @@ public final class JcrModifiableValueMap
                 entry = new JcrPropertyMapCacheEntry(prop);
                 cache.put(key, entry);
 
-                final Object defaultValue = entry.getDefaultValue();
+                final Object defaultValue = entry.getPropertyValue();
                 if (defaultValue != null) {
-                    valueCache.put(key, entry.getDefaultValue());
+                    valueCache.put(key, entry.getPropertyValue());
                 }
             }
             return entry;
@@ -366,15 +353,16 @@ public final class JcrModifiableValueMap
      * Handles key name escaping by taking into consideration if it contains a
      * registered prefix
      *
-     * @param key
+     * @param key the key to escape
      * @return escaped key name
+     * @throws RepositoryException if the repository's namespace prefixes cannot be retrieved
      */
     protected String escapeKeyName(final String key) throws RepositoryException {
         final int indexOfPrefix = key.indexOf(':');
         // check if colon is neither the first nor the last character
         if (indexOfPrefix > 0 && key.length() > indexOfPrefix + 1) {
             final String prefix = key.substring(0, indexOfPrefix);
-            for (final String existingPrefix : getNamespacePrefixes()) {
+            for (final String existingPrefix : this.helper.getNamespacePrefixes(this.node.getSession())) {
                 if (existingPrefix.equals(prefix)) {
                     return prefix
                             + ":"
@@ -384,16 +372,6 @@ public final class JcrModifiableValueMap
             }
         }
         return Text.escapeIllegalJcrChars(key);
-    }
-
-    /**
-    * Read namespace prefixes and store as member variable to minimize number of JCR API calls
-    */
-    private String[] getNamespacePrefixes() throws RepositoryException {
-        if (this.namespacePrefixes == null) {
-            this.namespacePrefixes = getNode().getSession().getNamespacePrefixes();
-        }
-        return this.namespacePrefixes;
     }
 
     /**
@@ -417,159 +395,6 @@ public final class JcrModifiableValueMap
 
     // ---------- Implementation helper
 
-    @SuppressWarnings("unchecked")
-    private <T> T convertToType(final JcrPropertyMapCacheEntry entry, Class<T> type) {
-        T result = null;
-
-        try {
-            final boolean array = type.isArray();
-
-            if (entry.isMulti) {
-
-                if (array) {
-
-                    result = (T) convertToArray(entry,
-                        type.getComponentType());
-
-                } else if (entry.values.length > 0) {
-
-                    result = convertToType(entry, -1, entry.values[0], type);
-
-                }
-
-            } else {
-
-                if (array) {
-
-                    result = (T) convertToArray(entry,
-                            type.getComponentType());
-
-                } else {
-
-                    result = convertToType(entry, -1, entry.values[0], type);
-
-                }
-            }
-
-        } catch (ValueFormatException vfe) {
-            LOGGER.info("converToType: Cannot convert value of " + entry.getDefaultValueOrNull()
-                + " to " + type, vfe);
-        } catch (RepositoryException re) {
-            LOGGER.info("converToType: Cannot get value of " + entry.getDefaultValueOrNull(), re);
-        }
-
-        // fall back to nothing
-        return result;
-    }
-
-    private <T> T[] convertToArray(final JcrPropertyMapCacheEntry entry, Class<T> type)
-    throws ValueFormatException, RepositoryException {
-        List<T> values = new ArrayList<T>();
-        for (int i = 0; i < entry.values.length; i++) {
-            T value = convertToType(entry, i, entry.values[i], type);
-            if (value != null) {
-                values.add(value);
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        T[] result = (T[]) Array.newInstance(type, values.size());
-
-        return values.toArray(result);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> T convertToType(final JcrPropertyMapCacheEntry entry,
-                                final int index,
-                                final Value jcrValue,
-                                final Class<T> type)
-    throws ValueFormatException, RepositoryException {
-        Object defaultValue = entry.getDefaultValue();
-        if ( type.isInstance(defaultValue) ) {
-            return (T) defaultValue;
-        }
-
-        if (String.class == type) {
-            return (T) jcrValue.getString();
-
-        } else if (Byte.class == type) {
-            return (T) Byte.valueOf((byte) jcrValue.getLong());
-
-        } else if (Short.class == type) {
-            return (T) Short.valueOf((short) jcrValue.getLong());
-
-        } else if (Integer.class == type) {
-            return (T) Integer.valueOf((int) jcrValue.getLong());
-
-        } else if (Long.class == type) {
-            if (jcrValue.getType() == PropertyType.BINARY) {
-                if (index == -1) {
-                    return (T) Long.valueOf(entry.property.getLength());
-                }
-                return (T) Long.valueOf(entry.property.getLengths()[index]);
-            }
-            return (T) Long.valueOf(jcrValue.getLong());
-
-        } else if (Float.class == type) {
-            return (T) Float.valueOf((float) jcrValue.getDouble());
-
-        } else if (Double.class == type) {
-            return (T) Double.valueOf(jcrValue.getDouble());
-
-        } else if (BigDecimal.class == type) {
-            return (T) jcrValue.getDecimal();
-
-        } else if (Boolean.class == type) {
-            return (T) Boolean.valueOf(jcrValue.getBoolean());
-
-        } else if (Date.class == type) {
-            return (T) jcrValue.getDate().getTime();
-
-        } else if (Calendar.class == type) {
-            return (T) jcrValue.getDate();
-
-        } else if (Value.class == type) {
-            return (T) jcrValue;
-
-        } else if (Property.class == type) {
-            return (T) entry.property;
-
-        } else if (ObjectInputStream.class == type) {
-            if ( jcrValue.getType() == PropertyType.BINARY ) {
-                try {
-                    return (T) new ObjectInputStream(jcrValue.getBinary().getStream(), this.dynamicClassLoader);
-                } catch (IOException ioe) {
-                    // ignore and use fallback
-                }
-            }
-        } else if (Serializable.class.isAssignableFrom(type)
-                && jcrValue.getType() == PropertyType.BINARY) {
-            ObjectInputStream ois = null;
-            try {
-                ois = new ObjectInputStream(jcrValue.getBinary().getStream(), this.dynamicClassLoader);
-                final Object obj = ois.readObject();
-                if ( type.isInstance(obj) ) {
-                    return (T)obj;
-                }
-            } catch (ClassNotFoundException cnfe) {
-                 // ignore and use fallback
-            } catch (IOException ioe) {
-                // ignore and use fallback
-            } finally {
-                if ( ois != null ) {
-                    try {
-                        ois.close();
-                    } catch (IOException ignore) {
-                        // ignore
-                    }
-                }
-            }
-        }
-
-        // fallback in case of unsupported type
-        return null;
-    }
-
     private Class<?> normalizeClass(Class<?> type) {
         if (Calendar.class.isAssignableFrom(type)) {
             type = Calendar.class;
@@ -585,36 +410,11 @@ public final class JcrModifiableValueMap
 
     private Map<String, Object> transformEntries(final Map<String, JcrPropertyMapCacheEntry> map) {
 
-        Map<String, Object> transformedEntries = new LinkedHashMap<String, Object>(map.size());
-        for ( Map.Entry<String, JcrPropertyMapCacheEntry> entry : map.entrySet() )
-            transformedEntries.put(entry.getKey(), entry.getValue().getDefaultValueOrNull());
+        final Map<String, Object> transformedEntries = new LinkedHashMap<String, Object>(map.size());
+        for ( final Map.Entry<String, JcrPropertyMapCacheEntry> entry : map.entrySet() )
+            transformedEntries.put(entry.getKey(), entry.getValue().getPropertyValueOrNull());
 
         return transformedEntries;
-    }
-
-    /**
-     * This is an extended version of the object input stream which uses the
-     * thread context class loader.
-     */
-    private static class ObjectInputStream extends java.io.ObjectInputStream {
-
-        private ClassLoader classloader;
-
-        public ObjectInputStream(final InputStream in, final ClassLoader classLoader) throws IOException {
-            super(in);
-            this.classloader = classLoader;
-        }
-
-        /**
-         * @see java.io.ObjectInputStream#resolveClass(java.io.ObjectStreamClass)
-         */
-        @Override
-        protected Class<?> resolveClass(java.io.ObjectStreamClass classDesc) throws IOException, ClassNotFoundException {
-            if ( this.classloader != null ) {
-                return this.classloader.loadClass(classDesc.getName());
-            }
-            return super.resolveClass(classDesc);
-        }
     }
 
     // ---------- Map
@@ -622,6 +422,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#clear()
      */
+    @Override
     public void clear() {
         throw new UnsupportedOperationException("clear");
     }
@@ -629,6 +430,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#put(java.lang.Object, java.lang.Object)
      */
+    @Override
     public Object put(final String aKey, final Object value) {
         final String key = checkKey(aKey);
         if ( key.indexOf('/') != -1 ) {
@@ -640,19 +442,17 @@ public final class JcrModifiableValueMap
         readFully();
         final Object oldValue = this.get(key);
         try {
-            final JcrPropertyMapCacheEntry entry = new JcrPropertyMapCacheEntry(value, getNode().getSession());
+            final JcrPropertyMapCacheEntry entry = new JcrPropertyMapCacheEntry(value, this.node);
             this.cache.put(key, entry);
             final String name = escapeKeyName(key);
             if ( NodeUtil.MIXIN_TYPES.equals(name) ) {
-                NodeUtil.handleMixinTypes(node, entry.values);
+                NodeUtil.handleMixinTypes(node, entry.convertToType(String[].class, node, this.helper.getDynamicClassLoader()));
             } else if ( "jcr:primaryType".equals(name) ) {
-                node.setPrimaryType(entry.values[0].getString());
+                node.setPrimaryType(entry.convertToType(String.class, node, this.helper.getDynamicClassLoader()));
+            } else if ( entry.isArray() ) {
+                node.setProperty(name, entry.convertToType(Value[].class, node, this.helper.getDynamicClassLoader()));
             } else {
-                if ( entry.isMulti ) {
-                    node.setProperty(name, entry.values);
-                } else {
-                    node.setProperty(name, entry.values[0]);
-                }
+                node.setProperty(name, entry.convertToType(Value.class, node, this.helper.getDynamicClassLoader()));
             }
         } catch (final RepositoryException re) {
             throw new IllegalArgumentException("Value for key " + key + " can't be put into node: " + value, re);
@@ -665,6 +465,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#putAll(java.util.Map)
      */
+    @Override
     public void putAll(final Map<? extends String, ? extends Object> t) {
         if ( t != null ) {
             final Iterator<?> i = t.entrySet().iterator();
@@ -679,6 +480,7 @@ public final class JcrModifiableValueMap
     /**
      * @see java.util.Map#remove(java.lang.Object)
      */
+    @Override
     public Object remove(final Object aKey) {
         final String key = checkKey(aKey.toString());
         readFully();
@@ -686,7 +488,9 @@ public final class JcrModifiableValueMap
         this.valueCache.remove(key);
         try {
             final String name = escapeKeyName(key);
-            this.node.setProperty(name, (String)null);
+            if ( node.hasProperty(name) ) {
+                node.getProperty(name).remove();
+            }
         } catch (final RepositoryException re) {
             throw new IllegalArgumentException("Value for key " + key + " can't be removed from node.", re);
         }

@@ -40,13 +40,78 @@ public class BundlesInstaller {
     public BundlesInstaller(WebconsoleClient wcc) {
         webconsoleClient = wcc;
     }
+   
+    public boolean isInstalled(File bundleFile) throws Exception {
+        final String bundleSymbolicName = getBundleSymbolicName(bundleFile);
+        try{
+            log.debug("Checking if installed: "+bundleSymbolicName);
+            webconsoleClient.checkBundleInstalled(bundleSymbolicName, 1);
+            // if this succeeds, then there's no need to install again
+            log.debug("Already installed: "+bundleSymbolicName);
+            return true;
+        } catch(AssertionError e) {
+            log.debug("Not yet installed: "+bundleSymbolicName);
+            return false;
+        }
+
+    }
+    
+    /** Check if the installed version matches the one of the bundle (file) **/
+    public boolean isInstalledWithSameVersion(File bundleFile) throws Exception {
+        final String bundleSymbolicName = getBundleSymbolicName(bundleFile);
+        final String versionOnServer = webconsoleClient.getBundleVersion(bundleSymbolicName);
+        final String versionInBundle = getBundleVersion(bundleFile);
+        if (versionOnServer.equals(versionInBundle)) {
+            return true;
+        } else {
+            log.info("Bundle installed doesn't match: "+bundleSymbolicName+
+                    ", versionOnServer="+versionOnServer+", versionInBundle="+versionInBundle);
+            return false;
+        }
+    }
     
     /** Install a list of bundles supplied as Files */
     public void installBundles(List<File> toInstall, boolean startBundles) throws Exception {
         for(File f : toInstall) {
+            final String bundleSymbolicName = getBundleSymbolicName(f);
+            if (isInstalled(f)) {
+                if (f.getName().contains("SNAPSHOT")) {
+                    log.info("Reinstalling (due to SNAPSHOT version): {}", bundleSymbolicName);
+                    webconsoleClient.uninstallBundle(bundleSymbolicName, f);
+                } else if (!isInstalledWithSameVersion(f)) {
+                    log.info("Reinstalling (due to version mismatch): {}", bundleSymbolicName);
+                    webconsoleClient.uninstallBundle(bundleSymbolicName, f);
+                } else {
+                    log.info("Not reinstalling: {}", bundleSymbolicName);
+                    continue;
+                }
+            }
             webconsoleClient.installBundle(f, startBundles);
+            log.info("Installed: {}", bundleSymbolicName);
         }
-        log.info("{} additional bundles installed from {}", toInstall.size(), toInstall.get(0).getAbsolutePath());
+        
+        // ensure that bundles are re-wired esp. if an existing bundle was updated
+        webconsoleClient.refreshPackages();
+
+        log.info("{} additional bundles installed", toInstall.size());
+    }
+    
+    /** Uninstall a list of bundles supplied as Files */
+    public void uninstallBundles(List<File> toUninstall) throws Exception {
+        for(File f : toUninstall) {
+            final String bundleSymbolicName = getBundleSymbolicName(f);
+            if (isInstalled(f)) {
+                log.info("Uninstalling bundle: {}", bundleSymbolicName);
+                webconsoleClient.uninstallBundle(bundleSymbolicName, f);
+            } else {
+                log.info("Could not uninstall: {} as it never was installed", bundleSymbolicName);
+            }
+        }
+        
+        // ensure that bundles are re-wired esp. if an existing bundle was updated
+        webconsoleClient.refreshPackages();
+
+        log.info("{} additional bundles uninstalled", toUninstall.size());
     }
     
     /** Wait for all bundles specified in symbolicNames list to be installed in the
@@ -104,5 +169,20 @@ public class BundlesInstaller {
             jis.close();
         }
         return name;
+    }
+    
+    public String getBundleVersion(File bundleFile) throws IOException {
+        String version = null;
+        final JarInputStream jis = new JarInputStream(new FileInputStream(bundleFile));
+        try {
+            final Manifest m = jis.getManifest();
+            if(m == null) {
+                fail("Manifest is null in " + bundleFile.getAbsolutePath());
+            }
+            version = m.getMainAttributes().getValue(Constants.BUNDLE_VERSION);
+        } finally {
+            jis.close();
+        }
+        return version;
     }
 }

@@ -33,171 +33,56 @@ import javax.servlet.Filter;
  */
 public class SlingFilterChainHelper {
 
-    SortedSet<FilterListEntry> filterList;
+    private static final FilterHandle[] EMPTY_FILTER_ARRAY = new FilterHandle[0];
 
-    Filter[] filters;
+    private SortedSet<FilterHandle> filterList;
+
+    private FilterHandle[] filters = EMPTY_FILTER_ARRAY;
 
     SlingFilterChainHelper() {
     }
 
-    public synchronized Filter addFilter(Filter filter,
-            Long filterId, int order) {
-        filters = null;
+    public synchronized Filter addFilter(final Filter filter,  String pattern,
+            final Long filterId, final int order, final String orderSource, FilterProcessorMBeanImpl mbean) {
         if (filterList == null) {
-            filterList = new TreeSet<FilterListEntry>();
+            filterList = new TreeSet<FilterHandle>();
         }
-        filterList.add(new FilterListEntry(filter, filterId, order));
+        filterList.add(new FilterHandle(filter, pattern, filterId, order, orderSource, mbean));
+        filters = getFiltersInternal();
         return filter;
     }
 
-    public synchronized Filter[] removeAllFilters() {
-        // will be returned after cleaning the lists
-        Filter[] removedFilters = getFilters();
-
-        filters = null;
-        filterList = null;
-
-        return removedFilters;
-    }
-
-    public synchronized Filter removeFilter(Filter filter) {
+    public synchronized boolean removeFilterById(final Object filterId) {
         if (filterList != null) {
-            filters = null;
-            for (Iterator<FilterListEntry> fi = filterList.iterator(); fi.hasNext();) {
-                FilterListEntry test = fi.next();
-                if (test.getFilter().equals(filter)) {
-                    fi.remove();
-                    return test.getFilter();
-                }
-            }
-        }
-
-        // no removed ComponentFilter
-        return null;
-    }
-
-    public synchronized boolean removeFilterById(Object filterId) {
-        if (filterList != null) {
-            filters = null;
-            for (Iterator<FilterListEntry> fi = filterList.iterator(); fi.hasNext();) {
-                FilterListEntry test = fi.next();
-                if (test.getFitlerId() == filterId
-                    || (test.getFitlerId() != null && test.getFitlerId().equals(
+            for (Iterator<FilterHandle> fi = filterList.iterator(); fi.hasNext();) {
+                FilterHandle test = fi.next();
+                if (test.getFilterId() == filterId
+                    || (test.getFilterId() != null && test.getFilterId().equals(
                         filterId))) {
                     fi.remove();
+                    filters = getFiltersInternal();
                     return true;
                 }
             }
         }
 
-        // no removed ComponentFilter
+        // no removed filter
         return false;
     }
 
     /**
      * Returns the list of <code>Filter</code>s added to this instance
      * or <code>null</code> if no filters have been added.
+     * This method doesn't need to be synced as it is called from synced methods.
      */
-    public synchronized Filter[] getFilters() {
-        if (filters == null) {
-            if (filterList != null && !filterList.isEmpty()) {
-                Filter[] tmp = new Filter[filterList.size()];
-                int i = 0;
-                for (FilterListEntry entry : filterList) {
-                    tmp[i] = entry.getFilter();
-                    i++;
-                }
-                filters = tmp;
-            }
-        }
+    public FilterHandle[] getFilters() {
         return filters;
     }
 
-    /**
-     * Returns the list of <code>FilterListEntry</code>s added to this instance
-     * or <code>null</code> if no filters have been added.
-     */
-    public synchronized FilterListEntry[] getFilterListEntries() {
-        FilterListEntry[] result = null;
-        if (filterList != null && !filterList.isEmpty()) {
-            result = new FilterListEntry[filterList.size()];
-            filterList.toArray(result);
+    private FilterHandle[] getFiltersInternal() {
+        if (filterList == null || filterList.isEmpty()) {
+            return EMPTY_FILTER_ARRAY;
         }
-        return result;
-    }
-
-    public static class FilterListEntry implements Comparable<FilterListEntry> {
-
-        private final Filter filter;
-
-        private final Long filterId;
-
-        private final int order;
-
-        FilterListEntry(Filter filter, Long filterId, int order) {
-            this.filter = filter;
-            this.filterId = filterId;
-            this.order = order;
-        }
-
-        public Filter getFilter() {
-            return filter;
-        }
-
-        public Long getFitlerId() {
-            return filterId;
-        }
-
-        public int getOrder() {
-            return order;
-        }
-
-        /**
-         * Note: this class has a natural ordering that is inconsistent with
-         * equals.
-         */
-        public int compareTo(FilterListEntry other) {
-            if (this == other || equals(other)) {
-                return 0;
-            }
-
-            if (order < other.order) {
-                return -1;
-            } else if (order > other.order) {
-                return 1;
-            }
-
-            // if the filterId is comparable and the other is of the same class
-            if (filterId != null && other.filterId != null) {
-                int comp = filterId.compareTo(other.filterId);
-                if (comp != 0) {
-                    return comp;
-                }
-            }
-
-            // this is inserted, obj is existing key
-            return 1; // insert after current key
-        }
-
-        @Override
-        public int hashCode() {
-            if ( filter == null ) {
-                return 0;
-            }
-            return filter.hashCode();
-        }
-
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-
-            if (obj instanceof FilterListEntry) {
-                FilterListEntry other = (FilterListEntry) obj;
-                return getFilter().equals(other.getFilter());
-            }
-
-            return false;
-        }
+        return filterList.toArray(new FilterHandle[filterList.size()]);
     }
 }

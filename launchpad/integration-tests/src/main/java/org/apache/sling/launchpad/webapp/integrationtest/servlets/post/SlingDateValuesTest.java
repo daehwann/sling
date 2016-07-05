@@ -17,13 +17,19 @@
 package org.apache.sling.launchpad.webapp.integrationtest.servlets.post;
 
 import java.io.IOException;
+import java.text.DateFormat;
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
+import java.util.TimeZone;
 
+import org.apache.jackrabbit.util.ISO8601;
 import org.apache.sling.commons.testing.integration.HttpTestBase;
 import org.apache.sling.commons.testing.integration.NameValuePairList;
 import org.apache.sling.servlets.post.SlingPostConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  *  checks if the date parsing for non jcr-dates works.
@@ -31,13 +37,14 @@ import org.apache.sling.servlets.post.SlingPostConstants;
 
 public class SlingDateValuesTest extends HttpTestBase {
 
-    public static final String TEST_BASE_PATH = "/sling-tests";
+    private static final String ECMA_FORMAT = "EEE MMM dd yyyy HH:mm:ss 'GMT'Z";
 
-    // TODO: the commented formats do not work beacuse of SLING-242
-    //       the + of the timezone offset is stripped by sling
+    public static final String TEST_BASE_PATH = "/sling-tests";
+    
+    private final Logger log = LoggerFactory.getLogger(getClass());
 
     private final SimpleDateFormat[] testFormats = new SimpleDateFormat[]{
-        new SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT'Z", Locale.US),
+        new SimpleDateFormat(ECMA_FORMAT, Locale.US),
         new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.US),
         new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US),
         new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
@@ -65,15 +72,19 @@ public class SlingDateValuesTest extends HttpTestBase {
         String content = getContent(createdNodeUrl + ".json", CONTENT_TYPE_JSON);
 
         // default behaviour writes empty string
+        log.info("Expecting [{}] -> [{}] (single value)", input, expected);
         assertJavascript(expected, content, "out.println(data.someDate)");
+        
         assertJavascript(expected, content, "out.println(data.manyDates[0])");
+        
+        log.info("Expecting [{}] -> [{}] (multi-value)", input2, expected2);
         assertJavascript(expected2, content, "out.println(data.manyDates[1])");
     }
 
     public void testDateValues() throws IOException {
-        SimpleDateFormat ecmaFmt = new SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT'Z", Locale.US);
+        SimpleDateFormat ecmaFmt = new SimpleDateFormat(ECMA_FORMAT, Locale.US);
         Date now = new Date();
-        Date date2 = new Date(1000);
+        Date date2 = new Date(10000042L);
         String nowStr = ecmaFmt.format(now);
         String date2Str = ecmaFmt.format(date2);
         for (SimpleDateFormat fmt: testFormats) {
@@ -82,5 +93,29 @@ public class SlingDateValuesTest extends HttpTestBase {
             doDateTest(nowStr, testStr, date2Str, test2Str);
         }
     }
-
+    
+    
+    public void testDateTimezones() throws IOException{
+        
+        final int [] offsets = { -14400000, -4200000, 14400000, 4300000 };
+        for(int offset : offsets) {
+            for(String tzId : TimeZone.getAvailableIDs(offset)) {
+                final TimeZone tz =TimeZone.getTimeZone(tzId);
+                final Calendar cal = Calendar.getInstance(tz);
+                DateFormat fmt = new SimpleDateFormat(ECMA_FORMAT, Locale.ENGLISH);
+                fmt.setTimeZone(tz);
+                final String ecmaNow = fmt.format(cal.getTime());
+                final String isoNow=ISO8601.format(cal);
+                
+                final Calendar cal2= Calendar.getInstance(tz);
+                final String ecmaNow2 = fmt.format(cal2.getTime());
+                final String isoNow2=ISO8601.format(cal2);   
+                    
+                doDateTest(ecmaNow, isoNow, ecmaNow2, isoNow2);
+            }
+        }
+        
+        
+    }
+    
 }

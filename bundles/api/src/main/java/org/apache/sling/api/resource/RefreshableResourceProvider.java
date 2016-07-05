@@ -34,8 +34,10 @@ import aQute.bnd.annotation.ConsumerType;
  * @see ResourceProviderFactory#getResourceProvider(java.util.Map)
  * @see ResourceProviderFactory#getAdministrativeResourceProvider(java.util.Map)
  *
- * @since 2.3.0
+ * @since 2.3 (Sling API Bundle 2.4.0)
+ * @deprecated Use the {@link org.apache.sling.spi.resource.provider.ResourceProvider}
  */
+@Deprecated
 @ConsumerType
 public interface RefreshableResourceProvider extends ResourceProvider {
 

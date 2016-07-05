@@ -37,22 +37,21 @@ import org.apache.felix.scr.annotations.ReferenceCardinality;
 import org.apache.felix.scr.annotations.ReferencePolicy;
 import org.apache.felix.scr.annotations.References;
 import org.apache.sling.api.resource.ResourceDecorator;
-import org.apache.sling.api.resource.ResourceProvider;
-import org.apache.sling.api.resource.ResourceProviderFactory;
 import org.apache.sling.api.resource.ResourceResolverFactory;
+import org.apache.sling.api.resource.runtime.RuntimeService;
 import org.apache.sling.commons.osgi.PropertiesUtil;
-import org.apache.sling.featureflags.Features;
-import org.apache.sling.resourceresolver.impl.helper.FeaturesHolder;
 import org.apache.sling.resourceresolver.impl.helper.ResourceDecoratorTracker;
 import org.apache.sling.resourceresolver.impl.mapping.MapEntries;
 import org.apache.sling.resourceresolver.impl.mapping.Mapping;
-import org.apache.sling.resourceresolver.impl.tree.RootResourceProviderEntry;
+import org.apache.sling.resourceresolver.impl.observation.ResourceChangeListenerWhiteboard;
+import org.apache.sling.resourceresolver.impl.providers.ResourceProviderTracker;
+import org.apache.sling.resourceresolver.impl.providers.ResourceProviderTracker.ChangeListener;
+import org.apache.sling.resourceresolver.impl.providers.RuntimeServiceImpl;
 import org.apache.sling.serviceusermapping.ServiceUserMapper;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
 import org.osgi.framework.ServiceFactory;
-import org.osgi.framework.ServiceReference;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.event.EventAdmin;
@@ -63,7 +62,6 @@ import org.osgi.service.event.EventAdmin;
  * One all required providers and provider factories are available a resource resolver factory
  * is registered.
  *
- * TODO : Should we implement modifiable? It would be easy but what about long running resolvers?
  */
 @Component(
      name = "org.apache.sling.jcr.resource.internal.JcrResourceResolverFactoryImpl",
@@ -76,15 +74,16 @@ import org.osgi.service.event.EventAdmin;
     @Property(name = Constants.SERVICE_VENDOR, value = "The Apache Software Foundation")
 })
 @References({
-    @Reference(name = "ResourceProvider", referenceInterface = ResourceProvider.class, cardinality = ReferenceCardinality.OPTIONAL_MULTIPLE, policy = ReferencePolicy.DYNAMIC),
-    @Reference(name = "ResourceProviderFactory", referenceInterface = ResourceProviderFactory.class, cardinality = ReferenceCardinality.OPTIONAL_MULTIPLE, policy = ReferencePolicy.DYNAMIC),
     @Reference(name = "ResourceDecorator", referenceInterface = ResourceDecorator.class, cardinality = ReferenceCardinality.OPTIONAL_MULTIPLE, policy = ReferencePolicy.DYNAMIC)
 })
-public class ResourceResolverFactoryActivator implements FeaturesHolder {
+public class ResourceResolverFactoryActivator {
 
     private static final class FactoryRegistration {
         /** Registration .*/
         public volatile ServiceRegistration factoryRegistration;
+
+        /** Runtime registration. */
+        public volatile ServiceRegistration runtimeRegistration;
 
         public volatile CommonResourceResolverFactoryImpl commonFactory;
     }
@@ -188,6 +187,27 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
                             "are processed and added to the mappoing table.")
     private static final String PROP_ENABLE_VANITY_PATH = "resource.resolver.enable.vanitypath";
 
+    private static final long DEFAULT_MAX_CACHED_VANITY_PATHS = -1;
+    @Property(longValue = DEFAULT_MAX_CACHED_VANITY_PATHS,
+              label = "Maximum number of cached vanity path entries",
+              description = "The maximum number of cached vanity path entries. " +
+                            "Default is -1 (no limit)")
+    private static final String PROP_MAX_CACHED_VANITY_PATHS = "resource.resolver.vanitypath.maxEntries";
+
+    private static final boolean DEFAULT_MAX_CACHED_VANITY_PATHS_STARTUP = true;
+    @Property(boolValue = DEFAULT_MAX_CACHED_VANITY_PATHS_STARTUP,
+              label = "Limit the maximum number of cached vanity path entries only at startup",
+              description = "Limit the maximum number of cached vanity path entries only at startup. " +
+                            "Default is true")
+    private static final String PROP_MAX_CACHED_VANITY_PATHS_STARTUP = "resource.resolver.vanitypath.maxEntries.startup";
+
+    private static final int DEFAULT_VANITY_BLOOM_FILTER_MAX_BYTES = 1024000;
+    @Property(longValue = DEFAULT_VANITY_BLOOM_FILTER_MAX_BYTES,
+              label = "Maximum number of vanity bloom filter bytes",
+              description = "The maximum number of vanity bloom filter bytes. " +
+                            "Changing this value is subject to vanity bloom filter rebuild")
+    private static final String PROP_VANITY_BLOOM_FILTER_MAX_BYTES = " resource.resolver.vanitypath.bloomfilter.maxBytes";
+
     private static final boolean DEFAULT_ENABLE_OPTIMIZE_ALIAS_RESOLUTION = true;
     @Property(boolValue = DEFAULT_ENABLE_OPTIMIZE_ALIAS_RESOLUTION ,
               label = "Optimize alias resolution",
@@ -196,32 +216,66 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
                       " and on the alias update time if the number of aliases is huge (over 10000).")
     private static final String PROP_ENABLE_OPTIMIZE_ALIAS_RESOLUTION = "resource.resolver.optimize.alias.resolution";
 
-    // name of the Features service reference
-    private static final String FEATURES_NAME = "features";
+    @Property(unbounded=PropertyUnbounded.ARRAY,
+            label = "Allowed Vanity Path Location",
+            description ="This setting can contain a list of path prefixes, e.g. /libs/, /content/. If " +
+                    "such a list is configured, only vanity paths from resources starting with this prefix " +
+                    " are considered. If the list is empty, all vanity paths are used.")
+    private static final String PROP_ALLOWED_VANITY_PATH_PREFIX = "resource.resolver.vanitypath.whitelist";
+
+    @Property(unbounded=PropertyUnbounded.ARRAY,
+            label = "Denied Vanity Path Location",
+            description ="This setting can contain a list of path prefixes, e.g. /misc/. If " +
+                    "such a list is configured,vanity paths from resources starting with this prefix " +
+                    " are not considered. If the list is empty, all vanity paths are used.")
+    private static final String PROP_DENIED_VANITY_PATH_PREFIX = "resource.resolver.vanitypath.blacklist";
+
+    private static final boolean DEFAULT_VANITY_PATH_PRECEDENCE = false;
+    @Property(boolValue = DEFAULT_VANITY_PATH_PRECEDENCE ,
+              label = "Vanity Path Precedence",
+              description ="This flag controls whether vanity paths" +
+                      " will have precedence over existing /etc/map mapping")
+    private static final String PROP_VANITY_PATH_PRECEDENCE = "resource.resolver.vanity.precedence";
+
+    private static final boolean DEFAULT_PARANOID_PROVIDER_HANDLING = false;
+    @Property(boolValue = DEFAULT_PARANOID_PROVIDER_HANDLING,
+              label = "Paranoid Provider Handling",
+              description = "If this flag is enabled, an unregistration of a resource provider (not factory), "
+                          + "is causing the resource resolver factory to restart, potentially cleaning up "
+                          + "for memory leaks caused by objects hold from that resource provider.")
+    private static final String PROP_PARANOID_PROVIDER_HANDLING = "resource.resolver.providerhandling.paranoid";
+
+    private static final boolean DEFAULT_LOG_RESOURCE_RESOLVER_CLOSING = false;
+    @Property(boolValue = DEFAULT_LOG_RESOURCE_RESOLVER_CLOSING,
+              label = "Log resource resolver closing",
+              description = "When enabled CRUD operations with a closed resource resolver will log a stack trace " +
+                  "with the point where the used resolver was closed. It's advisable to not enable this feature on " +
+                  "production systems.")
+    private static final String PROP_LOG_RESOURCE_RESOLVER_CLOSING = "resource.resolver.log.closing";
 
     /** Tracker for the resource decorators. */
     private final ResourceDecoratorTracker resourceDecoratorTracker = new ResourceDecoratorTracker();
 
     /** all mappings */
-    private Mapping[] mappings;
+    private volatile Mapping[] mappings;
 
     /** The fake URLs */
-    private BidiMap virtualURLMap;
+    private volatile BidiMap virtualURLMap;
 
     /** <code>true</code>, if direct mappings from URI to handle are allowed */
-    private boolean allowDirect = false;
+    private volatile boolean allowDirect = false;
 
     /** the search path for ResourceResolver.getResource(String) */
-    private String[] searchPath;
+    private volatile String[] searchPath;
 
     /** the root location of the /etc/map entries */
-    private String mapRoot;
+    private volatile String mapRoot;
 
     /** whether to mangle paths with namespaces or not */
-    private boolean mangleNamespacePrefixes;
+    private volatile boolean mangleNamespacePrefixes;
 
-    /** The root provider entry. */
-    private final RootResourceProviderEntry rootProviderEntry = new RootResourceProviderEntry();
+    /** paranoid provider handling. */
+    private volatile boolean paranoidProviderHandling;
 
     /** Event admin. */
     @Reference
@@ -234,40 +288,41 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
     @Reference
     ResourceAccessSecurityTracker resourceAccessSecurityTracker;
 
-    /**
-     * Keeps the Features service object if available. This is kind of a
-     * tri-state variable:
-     * <ul>
-     * <li>If the service has not been accessed yet, the value is
-     * {@link #FEATURES_NAME}. This field is also set to {@link #FEATURES_NAME}
-     * by the {@link #featuresServiceChanged(ServiceReference)} if the service
-     * is registered or unregistered.</li>
-     * <li>{@code null} if the Features service is not available.</li>
-     * <li>The reference to the Features service object if available</li>
-     * </ul>
-     *
-     * @see #FEATURES_NAME
-     * @see #featuresServiceChanged(ServiceReference)
-     */
-    @Reference(
-            name = FEATURES_NAME,
-            referenceInterface = Features.class,
-            cardinality = ReferenceCardinality.OPTIONAL_UNARY,
-            policy = ReferencePolicy.DYNAMIC,
-            bind = "featuresServiceChanged",
-            unbind = "featuresServiceChanged")
-    private volatile Object featuresService = FEATURES_NAME;
+    volatile ResourceProviderTracker resourceProviderTracker;
+
+    volatile ResourceChangeListenerWhiteboard changeListenerWhiteboard;
 
     /** ComponentContext */
     private volatile ComponentContext componentContext;
 
-    private int defaultVanityPathRedirectStatus;
+    private volatile int defaultVanityPathRedirectStatus;
 
     /** vanityPath enabled? */
-    private boolean enableVanityPath = DEFAULT_ENABLE_VANITY_PATH;
+    private volatile boolean enableVanityPath = DEFAULT_ENABLE_VANITY_PATH;
 
     /** alias resource resolution optimization enabled? */
-    private boolean enableOptimizeAliasResolution = DEFAULT_ENABLE_OPTIMIZE_ALIAS_RESOLUTION;
+    private volatile boolean enableOptimizeAliasResolution = DEFAULT_ENABLE_OPTIMIZE_ALIAS_RESOLUTION;
+
+    /** max number of cache vanity path entries */
+    private volatile long maxCachedVanityPathEntries = DEFAULT_MAX_CACHED_VANITY_PATHS;
+
+    /** limit max number of cache vanity path entries only at startup*/
+    private volatile boolean maxCachedVanityPathEntriesStartup = DEFAULT_MAX_CACHED_VANITY_PATHS_STARTUP;
+
+    /** Maximum number of vanity bloom filter bytes */
+    private volatile int vanityBloomFilterMaxBytes = DEFAULT_VANITY_BLOOM_FILTER_MAX_BYTES;
+
+    /** vanity paths will have precedence over existing /etc/map mapping? */
+    private volatile boolean vanityPathPrecedence = DEFAULT_VANITY_PATH_PRECEDENCE;
+
+    /** log the place where a resource resolver is closed */
+    private volatile boolean logResourceResolverClosing = DEFAULT_LOG_RESOURCE_RESOLVER_CLOSING;
+
+    /** Vanity path whitelist */
+    private volatile String[] vanityPathWhiteList;
+
+    /** Vanity path blacklist */
+    private volatile String[] vanityPathBlackList;
 
     private final FactoryPreconditions preconds = new FactoryPreconditions();
 
@@ -285,22 +340,8 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
         return this.resourceAccessSecurityTracker;
     }
 
-    public Object getFeatures() {
-        if (this.featuresService == FEATURES_NAME) {
-            this.featuresService = this.componentContext.locateService(FEATURES_NAME);
-        }
-        return this.featuresService;
-    }
-
     public EventAdmin getEventAdmin() {
         return this.eventAdmin;
-    }
-
-    /**
-     * Getter for rootProviderEntry.
-     */
-    public RootResourceProviderEntry getRootProviderEntry() {
-        return rootProviderEntry;
     }
 
     /**
@@ -342,13 +383,42 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
         return this.enableOptimizeAliasResolution;
     }
 
+    public String[] getVanityPathWhiteList() {
+        return this.vanityPathWhiteList;
+    }
+
+    public String[] getVanityPathBlackList() {
+        return this.vanityPathBlackList;
+    }
+
+    public boolean hasVanityPathPrecedence() {
+        return this.vanityPathPrecedence;
+    }
+
+    public long getMaxCachedVanityPathEntries() {
+        return this.maxCachedVanityPathEntries;
+    }
+
+    public boolean isMaxCachedVanityPathEntriesStartup() {
+        return this.maxCachedVanityPathEntriesStartup;
+    }
+
+    public int getVanityBloomFilterMaxBytes() {
+        return this.vanityBloomFilterMaxBytes;
+    }
+
+    public boolean shouldLogResourceResolverClosing() {
+        return logResourceResolverClosing;
+    }
+
     // ---------- SCR Integration ---------------------------------------------
 
-    /** Activates this component, called by SCR before registering as a service */
+    /**
+     * Activates this component, called by SCR before registering as a service
+     */
     @Activate
     protected void activate(final ComponentContext componentContext) {
         this.componentContext = componentContext;
-        this.rootProviderEntry.setEventAdmin(this.eventAdmin);
         final Dictionary<?, ?> properties = componentContext.getProperties();
 
         final BidiMap virtuals = new TreeBidiMap();
@@ -395,7 +465,6 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
         if (searchPath == null) {
             searchPath = new String[] { "/" };
         }
-
         // namespace mangling
         mangleNamespacePrefixes = PropertiesUtil.toBoolean(properties.get(PROP_MANGLE_NAMESPACES), false);
 
@@ -405,15 +474,91 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
         defaultVanityPathRedirectStatus = PropertiesUtil.toInteger(properties.get(PROP_DEFAULT_VANITY_PATH_REDIRECT_STATUS),
                                                                    MapEntries.DEFAULT_DEFAULT_VANITY_PATH_REDIRECT_STATUS);
         this.enableVanityPath = PropertiesUtil.toBoolean(properties.get(PROP_ENABLE_VANITY_PATH), DEFAULT_ENABLE_VANITY_PATH);
+        // vanity path white list
+        this.vanityPathWhiteList = null;
+        String[] vanityPathPrefixes = PropertiesUtil.toStringArray(properties.get(PROP_ALLOWED_VANITY_PATH_PREFIX));
+        if ( vanityPathPrefixes != null ) {
+            final List<String> prefixList = new ArrayList<String>();
+            for(final String value : vanityPathPrefixes) {
+                if ( value.trim().length() > 0 ) {
+                    if ( value.trim().endsWith("/") ) {
+                        prefixList.add(value.trim());
+                    } else {
+                        prefixList.add(value.trim() + "/");
+                    }
+                }
+            }
+            if ( prefixList.size() > 0 ) {
+                this.vanityPathWhiteList = prefixList.toArray(new String[prefixList.size()]);
+            }
+        }
+        // vanity path black list
+        this.vanityPathBlackList = null;
+        vanityPathPrefixes = PropertiesUtil.toStringArray(properties.get(PROP_DENIED_VANITY_PATH_PREFIX));
+        if ( vanityPathPrefixes != null ) {
+            final List<String> prefixList = new ArrayList<String>();
+            for(final String value : vanityPathPrefixes) {
+                if ( value.trim().length() > 0 ) {
+                    if ( value.trim().endsWith("/") ) {
+                        prefixList.add(value.trim());
+                    } else {
+                        prefixList.add(value.trim() + "/");
+                    }
+                }
+            }
+            if ( prefixList.size() > 0 ) {
+                this.vanityPathBlackList = prefixList.toArray(new String[prefixList.size()]);
+            }
+        }
 
         this.enableOptimizeAliasResolution = PropertiesUtil.toBoolean(properties.get(PROP_ENABLE_OPTIMIZE_ALIAS_RESOLUTION), DEFAULT_ENABLE_OPTIMIZE_ALIAS_RESOLUTION);
+        this.maxCachedVanityPathEntries = PropertiesUtil.toLong(properties.get(PROP_MAX_CACHED_VANITY_PATHS), DEFAULT_MAX_CACHED_VANITY_PATHS);
+        this.maxCachedVanityPathEntriesStartup = PropertiesUtil.toBoolean(properties.get(PROP_MAX_CACHED_VANITY_PATHS_STARTUP), DEFAULT_MAX_CACHED_VANITY_PATHS_STARTUP);
+        this.vanityBloomFilterMaxBytes = PropertiesUtil.toInteger(properties.get(PROP_VANITY_BLOOM_FILTER_MAX_BYTES), DEFAULT_VANITY_BLOOM_FILTER_MAX_BYTES);
+
+        this.vanityPathPrecedence = PropertiesUtil.toBoolean(properties.get(PROP_VANITY_PATH_PRECEDENCE), DEFAULT_VANITY_PATH_PRECEDENCE);
+        this.logResourceResolverClosing = PropertiesUtil.toBoolean(properties.get(PROP_LOG_RESOURCE_RESOLVER_CLOSING),
+            DEFAULT_LOG_RESOURCE_RESOLVER_CLOSING);
+        this.paranoidProviderHandling = PropertiesUtil.toBoolean(properties.get(PROP_PARANOID_PROVIDER_HANDLING), DEFAULT_PARANOID_PROVIDER_HANDLING);
 
         final BundleContext bc = componentContext.getBundleContext();
 
         // check for required property
-        final String[] required = PropertiesUtil.toStringArray(properties.get(PROP_REQUIRED_PROVIDERS));
-        this.preconds.activate(bc, required);
-        this.checkFactoryPreconditions();
+        final String[] requiredResourceProviders = PropertiesUtil.toStringArray(properties.get(PROP_REQUIRED_PROVIDERS));
+
+        // for testing: if we run unit test, both trackers are set from the outside
+        if ( this.resourceProviderTracker == null ) {
+            this.resourceProviderTracker = new ResourceProviderTracker();
+            this.changeListenerWhiteboard = new ResourceChangeListenerWhiteboard();
+            this.preconds.activate(bc, requiredResourceProviders, resourceProviderTracker);
+            this.changeListenerWhiteboard.activate(this.componentContext.getBundleContext(),
+                this.resourceProviderTracker, searchPath);
+            this.resourceProviderTracker.activate(this.componentContext.getBundleContext(),
+                    this.eventAdmin,
+                    new ChangeListener() {
+
+                        @Override
+                        public void providerAdded() {
+                            if ( factoryRegistration == null ) {
+                                checkFactoryPreconditions(null);
+                            }
+
+                        }
+
+                        @Override
+                        public void providerRemoved(final String pid, final boolean stateful, final boolean isUsed) {
+                            if ( factoryRegistration != null ) {
+                                if ( isUsed && (stateful || paranoidProviderHandling) ) {
+                                    unregisterFactory();
+                                }
+                                checkFactoryPreconditions(pid);
+                            }
+                        }
+                    });
+        } else {
+            this.preconds.activate(bc, requiredResourceProviders, resourceProviderTracker);
+            this.checkFactoryPreconditions(null);
+         }
     }
 
     /**
@@ -421,16 +566,20 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
      */
     @Deactivate
     protected void deactivate() {
-        this.componentContext = null;
-        this.preconds.deactivate();
-        this.rootProviderEntry.setEventAdmin(null);
-        this.resourceDecoratorTracker.close();
-
         this.unregisterFactory();
+
+        this.componentContext = null;
+
+        this.changeListenerWhiteboard.deactivate();
+        this.resourceProviderTracker.deactivate();
+        this.preconds.deactivate();
+        this.resourceDecoratorTracker.close();
     }
 
     /**
      * Unregister the factory (if registered)
+     * This method might be called concurrently from deactivate and the
+     * background thread, therefore we need to synchronize.
      */
     private void unregisterFactory() {
         FactoryRegistration local = null;
@@ -451,8 +600,11 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
             if ( local.factoryRegistration != null ) {
                 local.factoryRegistration.unregister();
             }
+            if ( local.runtimeRegistration != null ) {
+                local.runtimeRegistration.unregister();
+            }
             if ( local.commonFactory != null ) {
-                local.commonFactory.deactivate();;
+                local.commonFactory.deactivate();
             }
         }
     }
@@ -461,17 +613,9 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
      * Try to register the factory.
      */
     private void registerFactory(final ComponentContext localContext) {
-        final FactoryRegistration local;
-        synchronized (this) {
-            if (this.factoryRegistration == null) {
-                this.factoryRegistration = new FactoryRegistration();
-                local = this.factoryRegistration;
-            } else {
-                local = null;
-            }
-        }
+        final FactoryRegistration local = new FactoryRegistration();
 
-        if ( local != null ) {
+        if ( localContext != null ) {
             // activate and register factory
             final Dictionary<String, Object> serviceProps = new Hashtable<String, Object>();
             serviceProps.put(Constants.SERVICE_VENDOR, localContext.getProperties().get(Constants.SERVICE_VENDOR));
@@ -482,87 +626,56 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
             local.factoryRegistration = localContext.getBundleContext().registerService(
                 ResourceResolverFactory.class.getName(), new ServiceFactory() {
 
+                    @Override
                     public Object getService(final Bundle bundle, final ServiceRegistration registration) {
+                        if ( ResourceResolverFactoryActivator.this.componentContext == null ) {
+                            return null;
+                        }
                         final ResourceResolverFactoryImpl r = new ResourceResolverFactoryImpl(
                                 local.commonFactory, bundle,
                             ResourceResolverFactoryActivator.this.serviceUserMapper);
                         return r;
                     }
 
+                    @Override
                     public void ungetService(final Bundle bundle, final ServiceRegistration registration, final Object service) {
                         // nothing to do
                     }
                 }, serviceProps);
 
-            // check if an unregister happened in between
-            boolean doUnregister = false;
-            synchronized ( this ) {
-                if ( this.factoryRegistration != local ) {
-                    doUnregister = true;
-                }
-            }
-            if ( doUnregister ) {
-                this.unregisterFactory(local);
-            }
+            local.runtimeRegistration = localContext.getBundleContext().registerService(RuntimeService.class.getName(),
+                    this.getRuntimeService(), null);
+
+            this.factoryRegistration = local;
         }
+    }
+
+    public RuntimeService getRuntimeService() {
+        return new RuntimeServiceImpl(this.resourceProviderTracker);
     }
 
     /**
      * Check the preconditions and if it changed, either register factory or unregister
      */
-    private void checkFactoryPreconditions() {
+    private void checkFactoryPreconditions(final String unavailableServicePid) {
         final ComponentContext localContext = this.componentContext;
         if ( localContext != null ) {
-            final boolean result = this.preconds.checkPreconditions();
-            if ( result ) {
-                this.registerFactory(localContext);
-            } else {
+            final boolean result = this.preconds.checkPreconditions(unavailableServicePid);
+            if ( result && this.factoryRegistration == null ) {
+                boolean create = true;
+                synchronized ( this ) {
+                    if ( this.factoryRegistration == null ) {
+                        this.factoryRegistration = new FactoryRegistration();
+                    } else {
+                        create = false;
+                    }
+                }
+                if ( create ) {
+                    this.registerFactory(localContext);
+                }
+            } else if ( !result && this.factoryRegistration != null ) {
                 this.unregisterFactory();
             }
-        }
-    }
-
-    /**
-     * Bind a resource provider.
-     */
-    protected void bindResourceProvider(final ResourceProvider provider, final Map<String, Object> props) {
-        this.rootProviderEntry.bindResourceProvider(provider, props);
-        this.preconds.bindProvider(props);
-        this.checkFactoryPreconditions();
-    }
-
-    /**
-     * Unbind a resource provider.
-     */
-    protected void unbindResourceProvider(final ResourceProvider provider, final Map<String, Object> props) {
-        this.rootProviderEntry.unbindResourceProvider(provider, props);
-        this.preconds.unbindProvider(props);
-        this.checkFactoryPreconditions();
-    }
-
-    /**
-     * Bind a resource provider factory.
-     */
-    protected void bindResourceProviderFactory(final ResourceProviderFactory provider, final Map<String, Object> props) {
-        this.rootProviderEntry.bindResourceProviderFactory(provider, props);
-        this.preconds.bindProvider(props);
-        this.checkFactoryPreconditions();
-    }
-
-    /**
-     * Unbind a resource provider factory.
-     */
-    protected void unbindResourceProviderFactory(final ResourceProviderFactory provider, final Map<String, Object> props) {
-        this.rootProviderEntry.unbindResourceProviderFactory(provider, props);
-        this.preconds.unbindProvider(props);
-        this.checkFactoryPreconditions();
-        boolean unregister = false;
-        synchronized ( this ) {
-            unregister = this.factoryRegistration != null;
-        }
-        if (unregister ) {
-            this.unregisterFactory();
-            this.checkFactoryPreconditions();
         }
     }
 
@@ -580,16 +693,7 @@ public class ResourceResolverFactoryActivator implements FeaturesHolder {
         this.resourceDecoratorTracker.unbindResourceDecorator(decorator, props);
     }
 
-    /**
-     * Signal method to be called if the Features service is bound
-     * or unbound. This method does not really care for the event, it
-     * just marks the {@link #featuresService} field to be checked
-     * again on the next access.
-     *
-     * @param ref ServiceReference is ignored but required by the DS spec
-     */
-    @SuppressWarnings("unused")
-    private void featuresServiceChanged(final ServiceReference ref) {
-        this.featuresService = FEATURES_NAME;
+    public ResourceProviderTracker getResourceProviderTracker() {
+        return resourceProviderTracker;
     }
 }

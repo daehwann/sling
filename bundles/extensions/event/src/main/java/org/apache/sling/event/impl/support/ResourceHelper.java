@@ -25,6 +25,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,11 +35,9 @@ import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.api.resource.ResourceUtil;
 import org.apache.sling.api.resource.ValueMap;
-import org.apache.sling.event.EventUtil;
 import org.apache.sling.event.impl.jobs.JobImpl;
-import org.apache.sling.event.impl.jobs.deprecated.JobStatusNotifier;
+import org.apache.sling.event.impl.jobs.config.MainQueueConfiguration;
 import org.apache.sling.event.jobs.Job;
-import org.apache.sling.event.jobs.JobUtil;
 import org.apache.sling.event.jobs.ScheduleInfo;
 import org.apache.sling.event.jobs.consumer.JobConsumer;
 import org.osgi.service.event.EventConstants;
@@ -48,8 +47,6 @@ public abstract class ResourceHelper {
     public static final String RESOURCE_TYPE_FOLDER = "sling:Folder";
 
     public static final String RESOURCE_TYPE_JOB = "slingevent:Job";
-
-    public static final String RESOURCE_TYPE_EVENT = "slingevent:Event";
 
     /** We use the same resource type as for timed events. */
     public static final String RESOURCE_TYPE_SCHEDULED_JOB = "slingevent:TimedEvent";
@@ -64,23 +61,16 @@ public abstract class ResourceHelper {
     public static final String PROPERTY_SCHEDULE_SUSPENDED = "slingevent:scheduleSuspended";
 
     public static final String PROPERTY_JOB_ID = "slingevent:eventId";
-    @Deprecated
-    public static final String PROPERTY_JOB_NAME = "event.job.id";
     public static final String PROPERTY_JOB_TOPIC = "event.job.topic";
+    public static final String PROPERTY_DISTRIBUTE = "event.distribute";
+    public static final String PROPERTY_APPLICATION = "event.application";
 
     /** List of ignored properties to write to the repository. */
-    @SuppressWarnings("deprecation")
     private static final String[] IGNORE_PROPERTIES = new String[] {
-        EventUtil.PROPERTY_DISTRIBUTE,
-        EventUtil.PROPERTY_APPLICATION,
+        ResourceHelper.PROPERTY_DISTRIBUTE,
+        ResourceHelper.PROPERTY_APPLICATION,
         EventConstants.EVENT_TOPIC,
         ResourceHelper.PROPERTY_JOB_ID,
-        JobUtil.PROPERTY_JOB_PARALLEL,
-        JobUtil.PROPERTY_JOB_RUN_LOCAL,
-        JobUtil.PROPERTY_JOB_QUEUE_ORDERED,
-        JobUtil.PROPERTY_NOTIFICATION_JOB,
-        Job.PROPERTY_JOB_PRIORITY,
-        JobStatusNotifier.CONTEXT_PROPERTY_NAME,
         JobImpl.PROPERTY_DELAY_OVERRIDE,
         JobConsumer.PROPERTY_JOB_ASYNC_HANDLER,
         Job.PROPERTY_JOB_PROGRESS_LOG,
@@ -127,12 +117,29 @@ public abstract class ResourceHelper {
     }
 
     /**
+     * Filter the queue name for not allowed characters and replace them
+     * - with the exception of the main queue, which will not be filtered
+     * @param queueName the suggested queue name
+     * @return the filtered queue name
+     */
+    public static String filterQueueName(final String queueName) {
+        if ( queueName.equals(MainQueueConfiguration.MAIN_QUEUE_NAME) ) {
+            return queueName;
+        } else {
+            return ResourceHelper.filterName(queueName);
+        }
+    }
+
+    /**
      * Filter the node name for not allowed characters and replace them.
-     * @param nodeName The suggested node name.
+     * @param resourceName The suggested resource name.
      * @return The filtered node name.
      */
     public static String filterName(final String resourceName) {
-        final StringBuilder sb  = new StringBuilder(resourceName.length());
+        if ( resourceName == null ) {
+            return null;
+        }
+        final StringBuilder sb = new StringBuilder(resourceName.length());
         char lastAdded = 0;
 
         for(int i=0; i < resourceName.length(); i++) {
@@ -201,16 +208,17 @@ public abstract class ResourceHelper {
                         if ( hasReadError == null ) {
                             hasReadError = new ArrayList<Exception>();
                         }
-                        final int count = hasReadError.size();
                         // let's find out which class might be missing
                         ObjectInputStream ois = null;
                         try {
                             ois = new ObjectInputStream((InputStream)entry.getValue());
                             ois.readObject();
+
+                            hasReadError.add(new Exception("Unable to deserialize property '" + entry.getKey() + "'"));
                         } catch (final ClassNotFoundException cnfe) {
                              hasReadError.add(new Exception("Unable to deserialize property '" + entry.getKey() + "'", cnfe));
                         } catch (final IOException ioe) {
-                            hasReadError.add(new Exception("Unable to deserialize property '" + entry.getKey() + "'", ioe));
+                            hasReadError.add(new RuntimeException("Unable to deserialize property '" + entry.getKey() + "'", ioe));
                         } finally {
                             if ( ois != null ) {
                                 try {
@@ -219,9 +227,6 @@ public abstract class ResourceHelper {
                                     // ignore
                                 }
                             }
-                        }
-                        if ( hasReadError.size() == count ) {
-                            hasReadError.add(new Exception("Unable to deserialize property '" + entry.getKey() + "'"));
                         }
                     }
                 }
@@ -251,39 +256,171 @@ public abstract class ResourceHelper {
     public static void getOrCreateBasePath(final ResourceResolver resolver,
             final String path)
     throws PersistenceException {
-        // TODO - we should rather fix ResourceUtil.getOrCreateResource:
-        //        on concurrent writes, create might fail!
-        for(int i=0;i<5;i++) {
-            try {
-                ResourceUtil.getOrCreateResource(resolver,
+       getOrCreateResource(resolver,
                         path,
                         ResourceHelper.RESOURCE_TYPE_FOLDER,
                         ResourceHelper.RESOURCE_TYPE_FOLDER,
                         true);
-                return;
-            } catch ( final PersistenceException pe ) {
-                // ignore
-            }
-        }
-        throw new PersistenceException("Unable to create resource with path " + path);
     }
 
     public static Resource getOrCreateResource(final ResourceResolver resolver,
             final String path, final Map<String, Object> props)
     throws PersistenceException {
-        // TODO - we should rather fix ResourceUtil.getOrCreateResource:
-        //        on concurrent writes, create might fail!
-        for(int i=0;i<5;i++) {
-            try {
-                return ResourceUtil.getOrCreateResource(resolver,
+       return getOrCreateResource(resolver,
                         path,
                         props,
                         ResourceHelper.RESOURCE_TYPE_FOLDER,
                         true);
+    }
+
+    /**
+     * Creates or gets the resource at the given path.
+     * This is a copy of Sling's API ResourceUtil method to avoid a dependency on the latest
+     * Sling API version! We can remove this once we update to Sling API > 2.8
+     * @param resolver The resource resolver to use for creation
+     * @param path     The full path to be created
+     * @param resourceType The optional resource type of the final resource to create
+     * @param intermediateResourceType THe optional resource type of all intermediate resources
+     * @param autoCommit If set to true, a commit is performed after each resource creation.
+     */
+    private static Resource getOrCreateResource(
+                            final ResourceResolver resolver,
+                            final String path,
+                            final String resourceType,
+                            final String intermediateResourceType,
+                            final boolean autoCommit)
+    throws PersistenceException {
+        final Map<String, Object> props;
+        if ( resourceType == null ) {
+            props = null;
+        } else {
+            props = Collections.singletonMap(ResourceResolver.PROPERTY_RESOURCE_TYPE, (Object)resourceType);
+        }
+        return getOrCreateResource(resolver, path, props, intermediateResourceType, autoCommit);
+    }
+
+    /**
+     * Creates or gets the resource at the given path.
+     * If an exception occurs, it retries the operation up to five times if autoCommit is enabled.
+     * In this case, {@link ResourceResolver#revert()} is called on the resolver before the
+     * creation is retried.
+     * This is a copy of Sling's API ResourceUtil method to avoid a dependency on the latest
+     * Sling API version! We can remove this once we update to Sling API > 2.8
+     *
+     * @param resolver The resource resolver to use for creation
+     * @param path     The full path to be created
+     * @param resourceProperties The optional resource properties of the final resource to create
+     * @param intermediateResourceType THe optional resource type of all intermediate resources
+     * @param autoCommit If set to true, a commit is performed after each resource creation.
+     */
+    private static Resource getOrCreateResource(
+            final ResourceResolver resolver,
+            final String path,
+            final Map<String, Object> resourceProperties,
+            final String intermediateResourceType,
+            final boolean autoCommit)
+    throws PersistenceException {
+        PersistenceException mostRecentPE = null;
+        for(int i=0;i<5;i++) {
+            try {
+                return getOrCreateResourceInternal(resolver,
+                        path,
+                        resourceProperties,
+                        intermediateResourceType,
+                        autoCommit);
             } catch ( final PersistenceException pe ) {
-                // ignore
+                if ( autoCommit ) {
+                    // in case of exception, revert to last clean state and retry
+                    resolver.revert();
+                    resolver.refresh();
+                    mostRecentPE = pe;
+                } else {
+                    throw pe;
+                }
             }
         }
-        throw new PersistenceException("Unable to create resource with path " + path);
+        throw mostRecentPE;
+    }
+
+    /**
+     * Creates or gets the resource at the given path.
+     * This is a copy of Sling's API ResourceUtil method to avoid a dependency on the latest
+     * Sling API version! We can remove this once we update to Sling API > 2.8
+     *
+     * @param resolver The resource resolver to use for creation
+     * @param path     The full path to be created
+     * @param resourceProperties The optional resource properties of the final resource to create
+     * @param intermediateResourceType THe optional resource type of all intermediate resources
+     * @param autoCommit If set to true, a commit is performed after each resource creation.
+     */
+    private static Resource getOrCreateResourceInternal(
+            final ResourceResolver resolver,
+            final String path,
+            final Map<String, Object> resourceProperties,
+            final String intermediateResourceType,
+            final boolean autoCommit)
+    throws PersistenceException {
+        Resource rsrc = resolver.getResource(path);
+        if ( rsrc == null ) {
+            final int lastPos = path.lastIndexOf('/');
+            final String name = path.substring(lastPos + 1);
+
+            final Resource parentResource;
+            if ( lastPos == 0 ) {
+                parentResource = resolver.getResource("/");
+            } else {
+                final String parentPath = path.substring(0, lastPos);
+                parentResource = getOrCreateResource(resolver,
+                        parentPath,
+                        intermediateResourceType,
+                        intermediateResourceType,
+                        autoCommit);
+            }
+            if ( autoCommit ) {
+                resolver.refresh();
+            }
+            try {
+                int retry = 5;
+                while ( retry > 0 && rsrc == null ) {
+                    rsrc = resolver.create(parentResource, name, resourceProperties);
+                    // check for SNS
+                    if ( !name.equals(rsrc.getName()) ) {
+                        resolver.refresh();
+                        resolver.delete(rsrc);
+                        rsrc = resolver.getResource(parentResource, name);
+                    }
+                    retry--;
+                }
+                if ( rsrc == null ) {
+                    throw new PersistenceException("Unable to create resource.");
+                }
+            } catch ( final PersistenceException pe ) {
+                // this could be thrown because someone else tried to create this
+                // node concurrently
+                resolver.refresh();
+                rsrc = resolver.getResource(parentResource, name);
+                if ( rsrc == null ) {
+                    throw pe;
+                }
+            }
+            if ( autoCommit ) {
+                try {
+                    resolver.commit();
+                    resolver.refresh();
+                    rsrc = resolver.getResource(parentResource, name);
+                } catch ( final PersistenceException pe ) {
+                    // try again - maybe someone else did create the resource in the meantime
+                    // or we ran into Jackrabbit's stale item exception in a clustered environment
+                    resolver.revert();
+                    resolver.refresh();
+                    rsrc = resolver.getResource(parentResource, name);
+                    if ( rsrc == null ) {
+                        rsrc = resolver.create(parentResource, name, resourceProperties);
+                        resolver.commit();
+                    }
+                }
+            }
+        }
+        return rsrc;
     }
 }

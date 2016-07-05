@@ -18,6 +18,8 @@
  */
 package org.apache.sling.api.scripting;
 
+import javax.annotation.Nonnull;
+
 import org.apache.sling.api.resource.Resource;
 
 import aQute.bnd.annotation.ConsumerType;
@@ -38,8 +40,9 @@ public interface SlingScript {
 
     /**
      * Returns the Resource providing the script source code.
+     * @return The script resource.
      */
-    Resource getScriptResource();
+    @Nonnull Resource getScriptResource();
 
     /**
      * Evaluates this script using the bound variables as global variables to
@@ -50,11 +53,11 @@ public interface SlingScript {
      *            requirements of the {@link SlingBindings} predefined variables
      *            set.
      * @return The value returned by the script.
-     * @throws ScriptEvaluationException If an error occurrs executing the
+     * @throws ScriptEvaluationException If an error occurs executing the
      *             script or preparing the script execution. The cause of the
-     *             evaluation execption is available as the exception cause.
+     *             evaluation exception is available as the exception cause.
      */
-    Object eval(SlingBindings props);
+    Object eval(@Nonnull SlingBindings props);
 
     /**
      * Evaluates this script using the bound variables as global variables to
@@ -67,9 +70,9 @@ public interface SlingScript {
      * @param method The name of the method to call.
      * @param args The arguments for the method call.
      * @return The value returned by the method from the script.
-     * @throws ScriptEvaluationException If an error occurrs executing the
+     * @throws ScriptEvaluationException If an error occurs executing the
      *             script or preparing the script execution. The cause of the
-     *             evaluation execption is available as the exception cause.
+     *             evaluation exception is available as the exception cause.
      */
-    Object call(SlingBindings props, String method, Object... args);
+    Object call(@Nonnull SlingBindings props, @Nonnull String method, Object... args);
 }

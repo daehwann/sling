@@ -1,35 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Licensed to the Apache Software Foundation (ASF) under one or
+    more contributor license agreements. See the NOTICE file
+    distributed with this work for additional information regarding
+    copyright ownership. The ASF licenses this file to you under the
+    Apache License, Version 2.0 (the "License"); you may not use
+    this file except in compliance with the License. You may obtain
+    a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0 Unless required by
+    applicable law or agreed to in writing, software distributed
+    under the License is distributed on an "AS IS" BASIS, WITHOUT
+    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions
+    and limitations under the License.
+-->
 <?eclipse version="3.0"?>
 <plugin>
-
-  <!-- Define the launch configuration's tab group -->
-  
-
-	<!-- Define images -->
-	
-	<!-- Define the editor section(s) we contribute to the WST UI -->
-  
-  <!-- Runtime images -->
-  
-  <!-- Menu contributions -->
-  
-   <!-- Property page for project to select directory to sync -->
-   <!--extension
-         point="org.eclipse.ui.newWizards">
-      <category
-            id="org.apache.sling.ide.eclipse.ui"
-            name="Sling">
-      </category>
-      <wizard
-            category="org.apache.sling.ide.eclipse.ui"
-            class="org.apache.sling.ide.eclipse.ui.wizards.NewNodeWizard"
-            id="org.apache.sling.ide.eclipse.ui.wizards.NewNodeWizard"
-            name="New node">
-         <selection
-               class="selection.Selection1">
-         </selection>
-      </wizard>
-   </extension-->
    <extension
          point="org.eclipse.ui.newWizards">
       <category
@@ -41,12 +28,46 @@
             class="org.apache.sling.ide.eclipse.ui.wizards.np.NewSlingBundleWizard"
             icon="icons/obj16/sling.gif"
             id="org.apache.sling.ide.eclipse.ui.wizards.np.NewSlingBundleWizard"
-            name="New Sling Bundle Project"
+            name="Sling Bundle Project"
             project="true">
       </wizard>
    </extension>
+    <extension
+         point="org.eclipse.ui.trace.traceComponents">
+      <component
+            id="org.eclipse.ui.trace.tracingPrefPage"
+            label="Sling IDE Tooling">
+         <bundle
+               name="org.apache.sling.ide.eclipse-m2e-ui"></bundle>
+      </component>
+   </extension>
+    <!-- marker to tell m2e that this plugin contains a lifecycle-mapping-metadata.xml -->
+    <extension point="org.eclipse.m2e.core.lifecycleMappingMetadataSource">
+    </extension>
 
-
-   
-   
-</plugin>    
+    <extension
+            point="org.eclipse.m2e.core.projectConfigurators">
+        <configurator
+                class="org.apache.sling.ide.eclipse.m2e.internal.BundleProjectConfigurator"
+                id="org.apache.sling.ide.eclipse.m2e.bundleconfigurator"
+                name="Sling Bundle Configurator"
+                secondaryTo="maven-bundle-plugin">
+        </configurator>
+        <configurator 
+                id="org.apache.sling.ide.eclipse.m2e.configurator"
+                class="org.apache.sling.ide.eclipse.m2e.internal.ContentPackageProjectConfigurator"
+                name="Sling Content Package Configurator" />        
+    </extension>
+    
+    <extension point="org.eclipse.m2e.core.lifecycleMappings">  
+	    <lifecycleMapping
+	      id="org.apache.sling.ide.eclipse.m2e.contentPackageLifecycleMapping"
+	            class="org.apache.sling.ide.eclipse.m2e.internal.ContentPackageLifecycleMapping"
+	            name="Sling Content Content Package Build Lifecycle Mapping">
+	    </lifecycleMapping>            
+    </extension>         
+	<extension point="org.eclipse.m2e.core.archetypeCatalogs">
+		<remote url="http://repo1.maven.org/maven2/"
+			description="Maven Central"/>
+	</extension>    
+</plugin>

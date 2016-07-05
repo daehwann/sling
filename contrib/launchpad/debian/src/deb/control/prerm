@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+echo $0 $*
+[ "$DEBUG" ] && set -x
+. /etc/default/sling || true
+
+if [ remove = "$1" ]; then
+	if service sling status; then
+    	service sling stop
+    fi
+    rm -f $SLING_DEFAULTS
+
+    # Generate a cleanup script to purge all generated files
+    # Note: validate all deletions!
+    cat >/tmp/sling-cleanup.sh <<-EOT
+    #!/bin/bash
+    echo Purging sling generated files
+    [ "$DEBUG" ] && set -x
+    [ "${SLING_EXEC}" ] 		&& [ -d ${SLING_EXEC} ] 	&& rm -rf ${SLING_EXEC}
+    [ "${SLING_LOG_DIR}" ] 		&& [ -d ${SLING_LOG_DIR} ]	&& rm -rf ${SLING_LOG_DIR}
+    # Purge deletes data as well
+    rm -f $0
+EOT
+
+fi

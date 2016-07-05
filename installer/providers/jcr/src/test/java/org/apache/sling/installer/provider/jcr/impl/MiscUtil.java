@@ -96,11 +96,10 @@ class MiscUtil {
     }
 
     /** Get the WatchedFolders of supplied JcrInstaller */
-    @SuppressWarnings({ "unchecked"})
-    static Collection<WatchedFolder> getWatchedFolders(JcrInstaller installer) throws Exception {
-        final Field f = installer.getClass().getDeclaredField("watchedFolders");
-        f.setAccessible(true);
-        return (Collection<WatchedFolder>)f.get(installer);
+    static Collection<WatchedFolder> getWatchedFolders(final JcrInstaller installer) {
+        final InstallerConfig cfg = installer.getConfiguration();
+
+        return cfg.cloneWatchedFolders();
     }
 
     /** Wait long enough for all changes in content to be processed by JcrInstaller */
@@ -110,7 +109,8 @@ class MiscUtil {
         // First wait for all JCR events to be delivered
         eventHelper.waitForEvents(5000L);
         // RescanTimer causes a SCAN_DELAY_MSEC wait after JCR events are received
-        Thread.sleep(RescanTimer.SCAN_DELAY_MSEC * 4);
+        // This assumes the RescanTimer is using its default delay, as per its javadoc
+        Thread.sleep(RescanTimer.DEFAULT_SCAN_DELAY_MSEC * 4);
         // And wait for a few JcrInstaller run cycles
         MiscUtil.waitForCycles(installer, startCycles, 2, 10000L);
     }

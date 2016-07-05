@@ -20,6 +20,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
+import org.apache.sling.commons.classloader.ClassLoaderWriter;
+import org.apache.sling.commons.compiler.JavaCompiler;
+
 /**
  * The <code>IOProvider</code> is an interface to provide more control of
  * sending output from JSP Java and Class generation phases as well as cleaning
@@ -106,4 +109,14 @@ public interface IOProvider {
      * Return the class loader to use
      */
     ClassLoader getClassLoader();
+
+    /**
+     * Return the Java Compiler
+     */
+    JavaCompiler getJavaCompiler();
+
+    /**
+     * Return the class loader writer
+     */
+    ClassLoaderWriter getClassLoaderWriter();
 }

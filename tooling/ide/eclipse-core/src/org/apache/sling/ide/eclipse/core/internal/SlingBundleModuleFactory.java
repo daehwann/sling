@@ -22,6 +22,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.sling.ide.log.Logger;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
@@ -40,12 +41,26 @@ import org.eclipse.wst.server.core.IModule;
 import org.eclipse.wst.server.core.model.IModuleResource;
 import org.eclipse.wst.server.core.model.ModuleDelegate;
 import org.eclipse.wst.server.core.util.ModuleFile;
+import org.eclipse.wst.server.core.util.ProjectModule;
 import org.eclipse.wst.server.core.util.ProjectModuleFactoryDelegate;
 
 public class SlingBundleModuleFactory extends ProjectModuleFactoryDelegate {
 
     static final String SLING_BUNDLE_FACET_ID = "sling.bundle";
 	private static final IPath[] SETTINGS_PATHS = new IPath[] {new Path(".settings")};
+    
+    @Override
+    public IModule[] getModules(IProject project) {
+        final IModule[] result = super.getModules(project);
+        if (result!=null && result.length>0) {
+            return result;
+        } else {
+            // try clearing the cache
+            // might fix SLING-3663 which could be due to a synchronization issue at first access time
+            clearCache(project);
+            return super.getModules(project);
+        }
+    }
     
     @Override
     protected IPath[] getListenerPaths() {
@@ -67,24 +82,27 @@ public class SlingBundleModuleFactory extends ProjectModuleFactoryDelegate {
 
         try {
             IFacetedProject facetedProject = ProjectFacetsManager.create(project);
+            if (facetedProject == null) {
+                return null;
+            }
             for (IProjectFacetVersion facet : facetedProject.getProjectFacets()) {
                 if (facet.getProjectFacet().getId().equals(SLING_BUNDLE_FACET_ID)) {
                     return createModule(project.getName(), project.getName(), SLING_BUNDLE_FACET_ID, "1.0", project);
                 }
             }
         } catch (CoreException ce) {
-            // TODO logging
+            Activator.getDefault().getPluginLogger().warn("Failed creating module for project " + project, ce);
         }
 
         return null;
     }
 
-    static class SlingBundleModuleDelegate extends ModuleDelegate {
+    static class SlingBundleModuleDelegate extends ProjectModule {
 
-        private final IModule module;
+        private static final IModule[] EMPTY_MODULES = new IModule[0];
 
         public SlingBundleModuleDelegate(IModule module) {
-            this.module = module;
+            super(module.getProject());
         }
 
         @Override
@@ -108,11 +126,10 @@ public class SlingBundleModuleFactory extends ProjectModuleFactoryDelegate {
          */
         @Override
         public IModuleResource[] members() throws CoreException {
-            IProject project = module.getProject();
-            final IJavaProject javaProject = ProjectHelper.asJavaProject(project);
-            final List<IModuleResource> resources = new ArrayList<IModuleResource>();
+            final IJavaProject javaProject = ProjectHelper.asJavaProject(getProject());
+            final List<IModuleResource> resources = new ArrayList<>();
             
-            final Set<String> filteredLocations = new HashSet<String>();
+            final Set<String> filteredLocations = new HashSet<>();
 
             final IJavaProject jp = javaProject;
             final IClasspathEntry[] rawCp = jp.getRawClasspath();
@@ -120,12 +137,12 @@ public class SlingBundleModuleFactory extends ProjectModuleFactoryDelegate {
 				IClasspathEntry aCp = rawCp[i];
 				IPath outputLocation = aCp.getOutputLocation();
 				if (outputLocation!=null) {
-					outputLocation = outputLocation.makeRelativeTo(project.getFullPath());
+                    outputLocation = outputLocation.makeRelativeTo(getProject().getFullPath());
 					filteredLocations.add(outputLocation.toString());
 				}
 			}
             
-            project.accept(new IResourceVisitor() {
+            getProject().accept(new IResourceVisitor() {
                 @Override
                 public boolean visit(IResource resource) throws CoreException {
 
@@ -157,17 +174,19 @@ public class SlingBundleModuleFactory extends ProjectModuleFactoryDelegate {
                 }
             });
 
+            Logger logger = Activator.getDefault().getPluginLogger();
+
             for (Iterator<IModuleResource> it = resources.iterator(); it.hasNext();) {
 				IModuleResource iModuleResource = it.next();
-				System.out.println(" ADDED: "+iModuleResource.getModuleRelativePath().toString());
-				
+                logger.trace("For module {0} added {1}", getName(), iModuleResource.getModuleRelativePath()
+                        .toString());
 			}
             return resources.toArray(new IModuleResource[resources.size()]);
         }
 
         @Override
         public IModule[] getChildModules() {
-            return new IModule[0]; // TODO revisit, do we need child modules?
+            return EMPTY_MODULES;
         }
     }
 }

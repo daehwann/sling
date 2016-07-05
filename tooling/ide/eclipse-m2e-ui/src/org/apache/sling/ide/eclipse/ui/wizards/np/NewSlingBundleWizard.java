@@ -16,56 +16,42 @@
  */
 package org.apache.sling.ide.eclipse.ui.wizards.np;
 
-import java.io.IOException;
-
 import org.apache.maven.archetype.catalog.Archetype;
-import org.apache.sling.ide.artifacts.EmbeddedArtifact;
-import org.apache.sling.ide.artifacts.EmbeddedArtifactLocator;
-import org.apache.sling.ide.eclipse.m2e.EmbeddedArchetypeInstaller;
-import org.apache.sling.ide.eclipse.m2e.internal.Activator;
-import org.apache.sling.ide.eclipse.m2e.internal.SharedImages;
-import org.eclipse.core.runtime.CoreException;
-import org.eclipse.jface.resource.ImageDescriptor;
+import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
+import org.apache.sling.ide.eclipse.ui.WhitelabelSupport;
 
-public class NewSlingBundleWizard extends AbstractNewSlingApplicationWizard {
-
-	@Override
-	public ImageDescriptor getLogo() {
-		return SharedImages.SLING_LOG;
-	}
+public class NewSlingBundleWizard extends AbstractNewMavenBasedSlingApplicationWizard {
 
 	@Override
 	public String doGetWindowTitle() {
-		return "New Sling Bundle Project";
+        return "New " + WhitelabelSupport.getProductName() + " Bundle Project";
 	}
 
 	@Override
 	public void installArchetypes() {
 
-        EmbeddedArtifactLocator artifactsLocator = Activator.getDefault().getArtifactsLocator();
-
-        // TODO - should we remove the special slingclipse-embedded artifact and simply install our version?
-	    EmbeddedArchetypeInstaller archetypeInstaller = new EmbeddedArchetypeInstaller(
-	    		"org.apache.sling", "sling-bundle-archetype", "slingclipse-embedded");
-	    try {
-
-            EmbeddedArtifact[] archetypeArtifacts = artifactsLocator.loadSlingBundleArchetype();
-
-            archetypeInstaller.addResource("pom", archetypeArtifacts[0].openInputStream());
-            archetypeInstaller.addResource("jar", archetypeArtifacts[1].openInputStream());
-			
-			archetypeInstaller.installArchetype();
-		} catch (IOException e) {
-            reportError(e);
-        } catch (CoreException e) {
-            reportError(e);
-        }
+        // rely on public archetypes only
 	}
 
 	@Override
 	public boolean acceptsArchetype(Archetype archetype) {
-		return (archetype.getGroupId().equals("org.apache.sling") &&
-				archetype.getArtifactId().equals("sling-bundle-archetype"));
+
+		boolean isSlingBundleArchetype = archetype.getGroupId().equals("org.apache.sling") &&
+				archetype.getArtifactId().equals("sling-bundle-archetype");
+		
+		if ( !isSlingBundleArchetype ) {
+		    return false;
+		}
+		
+        DefaultArtifactVersion version = new DefaultArtifactVersion(archetype.getVersion());
+
+        // release 1.0.2 is the first known good release
+        if (version.compareTo(new DefaultArtifactVersion("1.0.2")) < 0) {
+            return false;
+        }
+
+        return true;
+		
 	}
 
 }

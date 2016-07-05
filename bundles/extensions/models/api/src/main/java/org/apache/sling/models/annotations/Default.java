@@ -24,22 +24,22 @@ import java.lang.annotation.Target;
 /**
  * Default value for an injection.
  */
-@Target({ ElementType.FIELD, ElementType.METHOD })
+@Target({ ElementType.FIELD, ElementType.METHOD, ElementType.PARAMETER })
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Default {
 
-    boolean[] booleanValues() default false;
+    boolean[] booleanValues() default {};
 
-    double[] doubleValues() default 0;
+    double[] doubleValues() default {};
 
-    float[] floatValues() default 0;
+    float[] floatValues() default {};
 
-    int[] intValues() default 0;
+    int[] intValues() default {};
 
-    long[] longValues() default 0L;
+    long[] longValues() default {};
 
-    short[] shortValues() default 0;
+    short[] shortValues() default {};
 
-    String[] values() default "";
+    String[] values() default {};
 
 }

@@ -32,9 +32,7 @@ public interface QueueConfiguration {
     static enum Type {
         UNORDERED,          // unordered, parallel processing (push)
         ORDERED,            // ordered, FIFO (push)
-        TOPIC_ROUND_ROBIN,  // unordered, parallel processing, executed based on topic (push)
-        IGNORE,             // ignore job, but do not remove
-        DROP                // drop job without processing!
+        TOPIC_ROUND_ROBIN   // unordered, parallel processing, executed based on topic (push)
     }
 
     /**
@@ -63,13 +61,6 @@ public interface QueueConfiguration {
     Type getType();
 
     /**
-     * Return the thread priority for the job thread.
-     * @deprecated Use {@link #getThreadPriority()}
-     */
-    @Deprecated
-    JobUtil.JobPriority getPriority();
-
-    /**
      * Return the thread priority for the job thread
      */
     ThreadPriority getThreadPriority();
@@ -78,18 +69,6 @@ public interface QueueConfiguration {
      * Return the max number of parallel processes.
      */
     int getMaxParallel();
-
-    /**
-     * @deprecated This information is not used anymore
-     */
-    @Deprecated
-    boolean isLocalQueue();
-
-    /**
-     * @deprecated This information is not used anymore
-     */
-    @Deprecated
-    String[] getApplicationIds();
 
     /**
      * The list of topics this queue is bound to.
@@ -115,4 +94,10 @@ public interface QueueConfiguration {
      * Get the ranking of this configuration.
      */
     int getRanking();
+
+    /**
+     * Prefer to run the job on the same instance it was created on.
+     * @since 1.4
+     */
+    boolean isPreferRunOnCreationInstance();
 }

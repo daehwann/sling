@@ -19,7 +19,9 @@
 package org.apache.sling.api.wrappers;
 
 import java.lang.reflect.Array;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -69,21 +71,40 @@ public class ValueMapDecorator implements ValueMap {
             } else if (type.isArray()) {
                 return (T) convertToArray(obj, type.getComponentType());
             } else if (type == String.class) {
-                return (T) String.valueOf(obj);
+                return (T) String.valueOf(getSingleValue(obj));
             } else if (type == Integer.class) {
-                return (T) (Integer) Integer.parseInt(obj.toString());
+                return (T) (Integer) Integer.parseInt(getSingleValue(obj));
             } else if (type == Long.class) {
-                return (T) (Long) Long.parseLong(obj.toString());
+                return (T) (Long) Long.parseLong(getSingleValue(obj));
             } else if (type == Double.class) {
-                return (T) (Double) Double.parseDouble(obj.toString());
+                return (T) (Double) Double.parseDouble(getSingleValue(obj));
             } else if (type == Boolean.class) {
-                return (T) (Boolean) Boolean.parseBoolean(obj.toString());
+                return (T) (Boolean) Boolean.parseBoolean(getSingleValue(obj));
             } else {
                 return null;
             }
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * Gets a single value of String from the object. If the object is an array it returns it's first element.
+     * @param obj object or object array.
+     * @return result of <code>toString()</code> on object or first element of an object array. If @param obj is null
+     * or it's an array with first element that is null, then null is returned.
+     */
+    private String getSingleValue(Object obj) {
+        final String result;
+        if (obj == null) {
+            result = null;
+        } else if (obj.getClass().isArray()) {
+            final Object[] values = (Object[]) obj;
+            result = values[0] != null ? values[0].toString() : null;
+        } else {
+            result = obj.toString();
+        }
+        return result;
     }
 
     /**
@@ -95,17 +116,27 @@ public class ValueMapDecorator implements ValueMap {
     private <T> T[] convertToArray(Object obj, Class<T> type) {
         if (obj.getClass().isArray()) {
             final Object[] array = (Object[]) obj;
-			@SuppressWarnings("unchecked")
-			final T[] result = (T[]) Array.newInstance(type, array.length);
+            List<Object> resultList = new ArrayList<Object>();
             for (int i = 0; i < array.length; i++) {
-                result[i] = convert(array[i], type);
+                T singleValueResult = convert(array[i], type);
+                if (singleValueResult != null) {
+                    resultList.add(singleValueResult);
+                }
             }
-            return result;
+            if (resultList.isEmpty()) {
+                return null;
+            }
+            return resultList.toArray((T[]) Array.newInstance(type, resultList.size()));
         } else {
             @SuppressWarnings("unchecked")
-            final T[] result = (T[]) Array.newInstance(type, 1);
-            result[0] = convert(obj, type);
-            return result;
+            final T singleValueResult = convert(obj, type);
+            // return null for type conversion errors instead of single element array with value null
+            if (singleValueResult == null) {
+                return null;
+            }
+            final T[] arrayResult = (T[]) Array.newInstance(type, 1);
+            arrayResult[0] = singleValueResult;
+            return arrayResult;
         }
     }
 
@@ -209,4 +240,22 @@ public class ValueMapDecorator implements ValueMap {
     public String toString() {
         return super.toString() + " : " + this.base.toString();
     }
+
+    @Override
+    /**
+     * {@inheritDoc}
+     */
+    public int hashCode() {
+        return base.hashCode();
+    }
+
+    @Override
+    /**
+     * {@inheritDoc}
+     */
+    public boolean equals(Object obj) {
+        return base.equals(obj);
+    }
+
+
 }

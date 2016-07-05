@@ -25,19 +25,27 @@ import java.util.Set;
 
 import javax.jcr.Node;
 import javax.jcr.RepositoryException;
+import javax.jcr.Value;
 
 import org.apache.sling.api.resource.PersistableValueMap;
 import org.apache.sling.api.resource.PersistenceException;
 import org.apache.sling.jcr.resource.internal.NodeUtil;
 import org.apache.sling.jcr.resource.internal.helper.JcrPropertyMapCacheEntry;
+import org.slf4j.LoggerFactory;
 
 /**
  * This implementation of the value map allows to change
  * the properties and save them later on.
+ *
+ * @deprecated Resources should be adapted to a modifiable value map instead
  */
+@SuppressWarnings("deprecation")
+@Deprecated
 public final class JcrModifiablePropertyMap
     extends JcrPropertyMap
     implements PersistableValueMap {
+
+    private static volatile boolean LOG_DEPRECATED = true;
 
     /** Set of removed and changed properties. */
     private Set<String> changedProperties;
@@ -48,6 +56,10 @@ public final class JcrModifiablePropertyMap
      */
     public JcrModifiablePropertyMap(final Node node) {
         super(node);
+        if ( LOG_DEPRECATED ) {
+            LOG_DEPRECATED = false;
+            LoggerFactory.getLogger(this.getClass()).warn("DEPRECATION WARNING: JcrModifiablePropertyMap is deprecated. Please switch to resource API.");
+        }
     }
 
     /**
@@ -58,6 +70,10 @@ public final class JcrModifiablePropertyMap
      */
     public JcrModifiablePropertyMap(final Node node, final ClassLoader dynamicCL) {
         super(node, dynamicCL);
+        if ( LOG_DEPRECATED ) {
+            LOG_DEPRECATED = false;
+            LoggerFactory.getLogger(this.getClass()).warn("DEPRECATION WARNING: JcrModifiablePropertyMap is deprecated. Please switch to resource API.");
+        }
     }
 
     // ---------- Map
@@ -91,7 +107,7 @@ public final class JcrModifiablePropertyMap
         readFully();
         final Object oldValue = this.get(key);
         try {
-            this.cache.put(key, new JcrPropertyMapCacheEntry(value, getNode().getSession()));
+            this.cache.put(key, new JcrPropertyMapCacheEntry(value, this.getNode()));
         } catch (final RepositoryException re) {
             throw new IllegalArgumentException("Value for key " + key + " can't be put into node: " + value, re);
         }
@@ -138,6 +154,7 @@ public final class JcrModifiablePropertyMap
     /**
      * @see org.apache.sling.api.resource.PersistableValueMap#reset()
      */
+    @Override
     public void reset() {
         if ( this.changedProperties != null ) {
             this.changedProperties = null;
@@ -150,6 +167,7 @@ public final class JcrModifiablePropertyMap
     /**
      * @see org.apache.sling.api.resource.PersistableValueMap#save()
      */
+    @Override
     @SuppressWarnings("javadoc")
     public void save() throws PersistenceException {
         if ( this.changedProperties == null || this.changedProperties.size() == 0 ) {
@@ -162,7 +180,7 @@ public final class JcrModifiablePropertyMap
             if ( this.changedProperties.contains(NodeUtil.MIXIN_TYPES) ) {
                 if ( cache.containsKey(NodeUtil.MIXIN_TYPES) ) {
                     final JcrPropertyMapCacheEntry entry = cache.get(NodeUtil.MIXIN_TYPES);
-                    NodeUtil.handleMixinTypes(node, entry.values);
+                    NodeUtil.handleMixinTypes(node, entry.convertToType(String[].class, node, getDynamicClassLoader()));
                 } else {
                     // remove all mixin types!
                     NodeUtil.handleMixinTypes(node, null);
@@ -174,13 +192,15 @@ public final class JcrModifiablePropertyMap
                 if ( !NodeUtil.MIXIN_TYPES.equals(name) ) {
                     if ( cache.containsKey(key) ) {
                         final JcrPropertyMapCacheEntry entry = cache.get(key);
-                        if ( entry.isMulti ) {
-                            node.setProperty(name, entry.values);
+                        if ( entry.isArray() ) {
+                            node.setProperty(name, entry.convertToType(Value[].class, node, getDynamicClassLoader()));
                         } else {
-                            node.setProperty(name, entry.values[0]);
+                            node.setProperty(name, entry.convertToType(Value.class, node, getDynamicClassLoader()));
                         }
                     } else {
-                        node.setProperty(name, (String)null);
+                        if ( node.hasProperty(name) ) {
+                            node.getProperty(name).remove();
+                        }
                     }
                 }
             }

@@ -34,7 +34,7 @@ import aQute.bnd.annotation.ConsumerType;
  * The modifiable value map is only changeable through
  * one of these methods
  * <ul>
- *  <li>{@link #put(String, Object)}</li>
+ *  <li>{@link #put(Object, Object)}</li>
  *  <li>{@link #putAll(java.util.Map)}</li>
  *  <li>{@link #remove(Object)}</li>
  * </ul>
@@ -54,8 +54,11 @@ import aQute.bnd.annotation.ConsumerType;
  *
  * A modifiable value map should value {@link ResourceResolver#PROPERTY_RESOURCE_TYPE}
  * to set the resource type of a resource.
+ * <p>
+ * A modifiable value map must not support deep writes. A call of a modification method
+ * with a path should result in an IllegalArgumentException.
  *
- * @since 2.2
+ * @since 2.2  (Sling API Bundle 2.2.0)
  */
 @ConsumerType
 public interface ModifiableValueMap extends ValueMap {

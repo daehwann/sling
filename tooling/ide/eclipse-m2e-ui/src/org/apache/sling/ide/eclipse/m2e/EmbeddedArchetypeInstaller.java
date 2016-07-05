@@ -22,14 +22,21 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
 import org.apache.maven.DefaultMaven;
 import org.apache.maven.Maven;
 import org.apache.maven.archetype.catalog.Archetype;
@@ -53,7 +60,6 @@ import org.eclipse.m2e.core.MavenPlugin;
 import org.eclipse.m2e.core.embedder.IMaven;
 import org.eclipse.m2e.core.internal.MavenPluginActivator;
 import org.eclipse.m2e.core.internal.embedder.MavenImpl;
-import org.sonatype.aether.RepositorySystemSession;
 
 @SuppressWarnings("restriction")
 public class EmbeddedArchetypeInstaller {
@@ -62,7 +68,7 @@ public class EmbeddedArchetypeInstaller {
 	private final String artifactId;
 	private final String version;
 
-	private final Map<String,InputStream> origins = new HashMap<String,InputStream>();
+	private final Map<String,InputStream> origins = new HashMap<>();
 	
 	public EmbeddedArchetypeInstaller(final String groupId,
 			final String artifactId,
@@ -82,6 +88,9 @@ public class EmbeddedArchetypeInstaller {
 	}
 	
 	public void addResource(String fileExtension, URL origin) throws IOException {
+	    if (origin==null) {
+	        throw new IllegalArgumentException("origin must not be null");
+	    }
 		origins.put(fileExtension, origin.openStream());
 	}
 
@@ -105,11 +114,11 @@ public class EmbeddedArchetypeInstaller {
             // now create a RepositorySystemSession
             MavenExecutionRequest request = new DefaultMavenExecutionRequest();
             request.setLocalRepository(maven.getLocalRepository());
-            RepositorySystemSession repositorySession = mvn.newRepositorySession(request);
 
-            // set the MavenSession on the LegacySupport
-            MavenExecutionResult result = new DefaultMavenExecutionResult();
-            MavenSession session = new MavenSession(container, repositorySession, request, result);
+            // We need to support Maven 3.0.x as well, so we use reflection to
+            // access Aether APIs in a manner which is compatible with all Maven 3.x versions
+            // See https://maven.apache.org/docs/3.1.0/release-notes.html
+            MavenSession session = reflectiveCreateMavenSession(container, mvn, request);
             LegacySupport legacy = container.lookup(LegacySupport.class);
             legacy.setSession(session);
 
@@ -120,17 +129,20 @@ public class EmbeddedArchetypeInstaller {
             for (Iterator<Entry<String, InputStream>> it = entries.iterator(); it.hasNext();) {
                 final Entry<String, InputStream> entry = it.next();
                 final String fileExtension = entry.getKey();
-                final InputStream in = entry.getValue();
                 File tmpFile = File.createTempFile("slingClipseTmp", fileExtension);
-                FileOutputStream fos = new FileOutputStream(tmpFile);
-                copyStream(in, fos);
-                // TODO - close in case of exceptions
-                fos.close();
-                in.close();
-                Artifact jarArtifact = new DefaultArtifact(groupId, artifactId, version, "", fileExtension, "",
-                        new DefaultArtifactHandler());
-                dai.install(tmpFile, jarArtifact, maven.getLocalRepository());
-                tmpFile.delete();
+                
+
+                try (InputStream in = entry.getValue(); 
+                        FileOutputStream fos = new FileOutputStream(tmpFile)) {
+                    IOUtils.copy(in, fos);
+                    // the below code uses the fileExtension as a type. Most of the time this is correct
+                    // and should be fine for our usage
+                    Artifact jarArtifact = new DefaultArtifact(groupId, artifactId, version, "", fileExtension, "",
+                            new DefaultArtifactHandler(fileExtension));
+                    dai.install(tmpFile, jarArtifact, maven.getLocalRepository());
+                } finally {
+                    FileUtils.deleteQuietly(tmpFile);
+                }
             }
 
             Archetype archetype = new Archetype();
@@ -139,55 +151,72 @@ public class EmbeddedArchetypeInstaller {
             archetype.setVersion(version);
             org.apache.maven.archetype.Archetype archetyper = MavenPluginActivator.getDefault().getArchetype();
             archetyper.updateLocalCatalog(archetype);
-        } catch (CoreException e) {
-            throw e;
-        } catch (RuntimeException e) {
+        } catch (CoreException | RuntimeException e) {
             throw e;
         } catch (Exception e) {
             throw new CoreException(new Status(IStatus.ERROR, Activator.PLUGIN_ID, e.getMessage(), e));
         }
-
-//			ArchetypeCatalog defaultLocalCatalog = archetyper.getDefaultLocalCatalog();
-//			defaultLocalCatalog.addArchetype(archetype);
-//			manager.readCatalogs();
-
-//		try {
-//			ArtifactRepository localRepo = maven.getLocalRepository();
-//			dai.install(file, artifact, localRepo);
-//		} catch (ArtifactInstallationException e) {
-//			// TODO Auto-generated catch block
-//			e.printStackTrace();
-//		} catch (CoreException e) {
-//			// TODO Auto-generated catch block
-//			e.printStackTrace();
-//		}
-//		RepositorySystem ni = MavenPluginActivator.getDefault().getRepositorySystem();
-//		ni.install(arg0, arg1);
-//		manager.addArchetypeCatalogFactory(new ArchetypeCatalogFactory(id, description, editable) {
-//
-//			@Override
-//			public ArchetypeCatalog getArchetypeCatalog()
-//					throws CoreException {
-//				ArchetypeCatalog cat = new ArchetypeCatalog();
-//				Archetype myArchetype = new Archetype();
-//				myArchetype.
-//				cat.addArchetype(myArchetype);
-//				return cat;
-//			}
-//	    	
-//	    });
-
 	}
 
-    // TODO - replace with commons-io
-	private void copyStream(InputStream in, OutputStream os) throws IOException {
-		final byte[] bytes = new byte[4*1024];
-		while (true) {
-			final int numRead = in.read(bytes);
-			if (numRead < 0) {
-				break;
-			}
-			os.write(bytes, 0, numRead);
-		}
-	}
+    private MavenSession reflectiveCreateMavenSession(PlexusContainer container, DefaultMaven mvn, MavenExecutionRequest request)
+            throws IllegalAccessException, InvocationTargetException, InstantiationException {
+
+        Method newRepoSessionMethod = null;
+        for (Method m : mvn.getClass().getMethods()) {
+            if ("newRepositorySession".equals(m.getName())) {
+                newRepoSessionMethod = m;
+                break;
+            }
+        }
+
+        if (newRepoSessionMethod == null) {
+            throw new IllegalArgumentException("No 'newRepositorySession' method found on object " + mvn + " of type "
+                    + mvn.getClass().getName());
+        }
+
+        Object repositorySession = newRepoSessionMethod.invoke(mvn, request);
+
+        MavenExecutionResult result = new DefaultMavenExecutionResult();
+
+        Constructor<?> constructor = null;
+
+        outer: for (Constructor<?> c : MavenSession.class.getConstructors()) {
+
+            for (Class<?> klazz : getClasses(repositorySession)) {
+                Class<?>[] check = new Class<?>[] { PlexusContainer.class, klazz, MavenExecutionRequest.class,
+                        MavenExecutionResult.class };
+
+                if (Arrays.equals(c.getParameterTypes(), check)) {
+                    constructor = c;
+                    break outer;
+                }
+            }
+        }
+
+        if (constructor == null) {
+            throw new IllegalArgumentException("Unable to found matching MavenSession constructor");
+        }
+
+        return (MavenSession) constructor.newInstance(container, repositorySession, request, result);
+    }
+
+    private Class<?>[] getClasses(Object repositorySession) {
+
+        List<Class<?>> accu = new ArrayList<>();
+        Class<? extends Object> klazz = repositorySession.getClass();
+
+        getClasses(klazz, accu);
+        if (klazz.getSuperclass() != null) {
+            getClasses(klazz.getSuperclass(), accu);
+        }
+
+        return accu.toArray(new Class<?>[accu.size()]);
+    }
+
+    private void getClasses(Class<? extends Object> klazz, List<Class<?>> accu) {
+        accu.add(klazz);
+        for (Class<?> iface : klazz.getInterfaces()) {
+            accu.add(iface);
+        }
+    }
 }

@@ -54,7 +54,7 @@ public class StatisticsImpl implements Statistics {
     private volatile long cancelledJobs;
 
     public StatisticsImpl() {
-        this.startTime = System.currentTimeMillis();
+        this(System.currentTimeMillis());
     }
 
     public StatisticsImpl(final long startTime) {
@@ -176,7 +176,6 @@ public class StatisticsImpl implements Statistics {
     public synchronized void failedJob() {
         this.failedJobs++;
         this.activeJobs--;
-        this.queuedJobs++;
     }
 
     /**

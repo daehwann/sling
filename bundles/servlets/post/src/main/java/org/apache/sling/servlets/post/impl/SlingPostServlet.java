@@ -17,6 +17,8 @@
 package org.apache.sling.servlets.post.impl;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -42,7 +44,6 @@ import org.apache.felix.scr.annotations.References;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.sling.api.SlingHttpServletRequest;
 import org.apache.sling.api.SlingHttpServletResponse;
-import org.apache.sling.api.request.RequestProgressTracker;
 import org.apache.sling.api.resource.ResourceNotFoundException;
 import org.apache.sling.api.resource.ResourceUtil;
 import org.apache.sling.api.servlets.SlingAllMethodsServlet;
@@ -69,6 +70,7 @@ import org.apache.sling.servlets.post.impl.operations.ImportOperation;
 import org.apache.sling.servlets.post.impl.operations.ModifyOperation;
 import org.apache.sling.servlets.post.impl.operations.MoveOperation;
 import org.apache.sling.servlets.post.impl.operations.NopOperation;
+import org.apache.sling.servlets.post.impl.operations.RestoreOperation;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
 import org.osgi.framework.ServiceRegistration;
@@ -201,11 +203,11 @@ public class SlingPostServlet extends SlingAllMethodsServlet {
             } catch (ResourceNotFoundException rnfe) {
                 htmlResponse.setStatus(HttpServletResponse.SC_NOT_FOUND,
                     rnfe.getMessage());
-            } catch (Throwable throwable) {
-                log.debug("Exception while handling POST "
+            } catch (final Exception exception) {
+                log.warn("Exception while handling POST "
                     + request.getResource().getPath() + " with "
-                    + operation.getClass().getName(), throwable);
-                htmlResponse.setError(throwable);
+                    + operation.getClass().getName(), exception);
+                htmlResponse.setError(exception);
             }
 
         }
@@ -305,12 +307,24 @@ public class SlingPostServlet extends SlingAllMethodsServlet {
     protected String getRedirectUrl(final SlingHttpServletRequest request, final PostResponse ctx) {
         // redirect param has priority (but see below, magic star)
         String result = request.getParameter(SlingPostConstants.RP_REDIRECT_TO);
-        if (result != null && ctx.getPath() != null) {
+        if (result != null) {
+            try {
+                URI redirectUri = new URI(result);
+                if (redirectUri.getAuthority() != null) {
+                    // if it has a host information
+                    log.warn("redirect target ({}) does include host information ({}). This is not allowed for security reasons!", result, redirectUri.getAuthority());
+                    return null;
+                }
+            } catch (URISyntaxException e) {
+                log.warn("given redirect target ({}) is not a valid uri: {}", result, e);
+                return null;
+            }
+            
             log.debug("redirect requested as [{}] for path [{}]", result, ctx.getPath());
 
             // redirect to created/modified Resource
             final int star = result.indexOf('*');
-            if (star >= 0) {
+            if (star >= 0 && ctx.getPath() != null) {
                 final StringBuilder buf = new StringBuilder();
 
                 // anything before the star
@@ -401,6 +415,8 @@ public class SlingPostServlet extends SlingAllMethodsServlet {
             SlingPostConstants.OPERATION_CHECKIN, new CheckinOperation()));
         providedServices.add(registerOperation(bundleContext,
             SlingPostConstants.OPERATION_CHECKOUT, new CheckoutOperation()));
+        providedServices.add(registerOperation(bundleContext,
+                SlingPostConstants.OPERATION_RESTORE, new RestoreOperation()));
         providedServices.add(registerOperation(bundleContext,
             SlingPostConstants.OPERATION_IMPORT, importOperation));
 

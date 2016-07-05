@@ -18,9 +18,13 @@
  */
 package org.apache.sling.api.resource;
 
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
 
 import org.apache.sling.api.adapter.SlingAdaptable;
+import org.apache.sling.api.wrappers.DeepReadValueMapDecorator;
+import org.apache.sling.api.wrappers.ValueMapDecorator;
 
 /**
  * The <code>AbstractResource</code> is an abstract implementation of the
@@ -32,7 +36,7 @@ import org.apache.sling.api.adapter.SlingAdaptable;
  * always be able to support new methods that might be introduced in the
  * {@link Resource} interface in the future.
  *
- * @since 2.1.0
+ * @since 2.1.0 (Sling API Bundle 2.1.0)
  */
 public abstract class AbstractResource
     extends SlingAdaptable
@@ -52,16 +56,10 @@ public abstract class AbstractResource
     /**
      * Returns the parent resource of this resource.
      * <p>
-     * This method is implemented by getting the parent resource path first
-     * calling the {@link ResourceUtil#getParent(String)} method and then to
-     * retrieve that resource from the resource resolver.
+     * This method is implemented calling the {@link ResourceResolver#getParent(Resource)} method.
      */
     public Resource getParent() {
-        final String parentPath = ResourceUtil.getParent(getPath());
-        if (parentPath == null) {
-            return null;
-        }
-        return getResourceResolver().getResource(parentPath);
+        return getResourceResolver().getParent(this);
     }
 
     /**
@@ -104,7 +102,7 @@ public abstract class AbstractResource
             }
         };
     }
-    
+
     /**
      * Checks to see if there are direct children of this resource by invoking
      * {@link ResourceResolver#hasChildren(Resource)}.
@@ -121,5 +119,36 @@ public abstract class AbstractResource
      */
     public boolean isResourceType(final String resourceType) {
         return this.getResourceResolver().isResourceType(this, resourceType);
+    }
+
+    /**
+     * This method calls {@link Resource#adaptTo(Class)}
+     * with the {@link ValueMap} class as an argument. If the
+     * <code>adaptTo</code> method returns a map, this map is returned. If the
+     * resource is not adaptable to a value map, next an adaption to {@link Map}
+     * is tried and if this is successful the map is wrapped as a value map. If
+     * the adaptions are not successful an empty value map is returned.
+     * @see org.apache.sling.api.resource.Resource#getValueMap()
+     */
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    public ValueMap getValueMap() {
+        // adapt to ValueMap if resource is not null
+        ValueMap valueMap = this.adaptTo(ValueMap.class);
+
+        // if no resource or no ValueMap adapter, check Map
+        if (valueMap == null) {
+
+            Map map = this.adaptTo(Map.class);
+
+            // if not even adapting to map, assume an empty map
+            if (map == null) {
+                map = new HashMap<String, Object>();
+            }
+
+            // .. and decorate the plain map
+            valueMap = new DeepReadValueMapDecorator(this, new ValueMapDecorator(map));
+        }
+
+        return valueMap;
     }
 }

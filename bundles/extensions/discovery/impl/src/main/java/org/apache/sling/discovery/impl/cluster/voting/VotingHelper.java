@@ -25,8 +25,8 @@ import java.util.List;
 
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.discovery.commons.providers.util.ResourceHelper;
 import org.apache.sling.discovery.impl.Config;
-import org.apache.sling.discovery.impl.common.resource.ResourceHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,15 +46,21 @@ public class VotingHelper {
      * <p>
      * 'Not winning' means that a voting still did not receive a vote
      * from everybody
-     * @return the list of matching votings
+     * @return the list of matching votings - never returns null
      */
     public static List<VotingView> listOpenNonWinningVotings(
             final ResourceResolver resourceResolver, final Config config) {
+        if (config==null) {
+            logger.info("listOpenNonWinningVotings: config is null, bundle likely deactivated.");
+            return new ArrayList<VotingView>();
+        }
         final String ongoingVotingsPath = config.getOngoingVotingsPath();
         final Resource ongoingVotingsResource = resourceResolver
                 .getResource(ongoingVotingsPath);
         if (ongoingVotingsResource == null) {
-            logger.info("listOpenNonWinningVotings: no ongoing votings parent resource found"); // TOOD - is this expected?
+            // it is legal that at this stage there is no ongoingvotings node yet 
+            // for example when there was never a voting yet
+            logger.debug("listOpenNonWinningVotings: no ongoing votings parent resource found");
             return new ArrayList<VotingView>();
         }
         final Iterable<Resource> children = ongoingVotingsResource.getChildren();
@@ -66,11 +72,21 @@ public class VotingHelper {
         while (it.hasNext()) {
             Resource aChild = it.next();
             VotingView c = new VotingView(aChild);
-            if (c.matchesLiveView(config)
-                    && c.isOngoingVoting(config) && !c.hasNoVotes()
-                    && !c.isWinning()) {
+            String matchesLiveView;
+            try {
+                matchesLiveView = c.matchesLiveView(config);
+            } catch (Exception e) {
+                logger.error("listOpenNonWinningVotings: could not compare voting with live view: "+e, e);
+                continue;
+            }
+            boolean ongoingVoting = c.isOngoingVoting(config);
+            boolean hasNoVotes = c.hasNoVotes();
+            boolean isWinning = c.isWinning();
+            if (matchesLiveView == null
+                    && ongoingVoting && !hasNoVotes
+                    && !isWinning) {
             	if (logger.isDebugEnabled()) {
-	                logger.debug("listOpenNonWinningVotings: found a valid voting: "
+	                logger.debug("listOpenNonWinningVotings: found an open voting: "
 	                        + aChild
 	                        + ", properties="
 	                        + ResourceHelper.getPropertiesForLogging(aChild));
@@ -78,12 +94,12 @@ public class VotingHelper {
                 result.add(c);
             } else {
             	if (logger.isDebugEnabled()) {
-	                logger.debug("listOpenNonWinningVotings: found an invalid voting: "
+	                logger.debug("listOpenNonWinningVotings: a non-open voting: "
 	                        + aChild
-	                        + ", matches live: " + c.matchesLiveView(config)
-	                        + ", is ongoing: " + c.isOngoingVoting(config)
-	                        + ", has no votes: " + c.hasNoVotes()
-	                        + ", is winning: " + c.isWinning()
+	                        + ", matches live: " + matchesLiveView
+	                        + ", is ongoing: " + ongoingVoting
+	                        + ", has no votes: " + hasNoVotes
+	                        + ", is winning: " + isWinning
 	                        + ", properties="
 	                        + ResourceHelper.getPropertiesForLogging(aChild));
             	}
@@ -146,7 +162,9 @@ public class VotingHelper {
         Resource ongoingVotingsResource = resourceResolver
                 .getResource(ongoingVotingsPath);
         if (ongoingVotingsResource == null) {
-            logger.info("getWinningVoting: no ongoing votings parent resource found"); // TOOD - is this expected?
+            // it is legal that at this stage there is no ongoingvotings node yet 
+            // for example when there was never a voting yet
+            logger.debug("getWinningVoting: no ongoing votings parent resource found");
             return null;
         }
         Iterable<Resource> children = ongoingVotingsResource.getChildren();
@@ -155,11 +173,15 @@ public class VotingHelper {
         while (it.hasNext()) {
             Resource aChild = it.next();
             VotingView c = new VotingView(aChild);
-            if (c.isOngoingVoting(config) && c.isWinning()) {
+            boolean ongoing = c.isOngoingVoting(config);
+            boolean winning = c.isWinning();
+            if (ongoing && winning) {
             	if (logger.isDebugEnabled()) {
-            		logger.debug("getWinningVoting: a winning voting: " + c);
+            		logger.debug("getWinningVoting: a winning voting: " + aChild);
             	}
                 result.add(c);
+            } else {
+                logger.debug("getWinningVote: not winning: vote="+aChild+" is ongoing="+ongoing+", winning="+winning);
             }
         }
         if (result.size() == 1) {
@@ -176,30 +198,75 @@ public class VotingHelper {
      * @return the voting for which the given slingId has votes yes or was the
      * initiator
      */
-    public static VotingView getYesVotingOf(final ResourceResolver resourceResolver,
+    public static List<VotingView> getYesVotingsOf(final ResourceResolver resourceResolver,
             final Config config,
             final String slingId) {
+        if (resourceResolver == null) {
+            throw new IllegalArgumentException("resourceResolver must not be null");
+        }
+        if (config == null) {
+            throw new IllegalArgumentException("config must not be null");
+        }
+        if (slingId == null || slingId.length() == 0) {
+            throw new IllegalArgumentException("slingId must not be null or empty");
+        }
         final String ongoingVotingsPath = config.getOngoingVotingsPath();
         final Resource ongoingVotingsResource = resourceResolver
                 .getResource(ongoingVotingsPath);
+        if (ongoingVotingsResource == null) {
+            return null;
+        }
         final Iterable<Resource> children = ongoingVotingsResource.getChildren();
+        if (children == null) {
+            return null;
+        }
         final Iterator<Resource> it = children.iterator();
         final List<VotingView> result = new LinkedList<VotingView>();
         while (it.hasNext()) {
             Resource aChild = it.next();
             VotingView c = new VotingView(aChild);
-            if (c.hasVotedOrIsInitiator(slingId)) {
+            if (c.hasVotedYes(slingId)) {
                 result.add(c);
             }
         }
         if (result.size() >= 1) {
             // if result.size() is higher than 1, that means that there is more
             // than 1 yes vote
-            // from myself - which is a bug!
-            return result.get(0);
+            // which can happen if the local instance is initiator of one
+            // and has voted on another voting
+            return result;
         } else {
             return null;
         }
+    }
+
+    public static List<VotingView> listVotings(ResourceResolver resourceResolver, Config config) {
+        if (config==null) {
+            logger.info("listVotings: config is null, bundle likely deactivated.");
+            return new ArrayList<VotingView>();
+        }
+        final String ongoingVotingsPath = config.getOngoingVotingsPath();
+        final Resource ongoingVotingsResource = resourceResolver
+                .getResource(ongoingVotingsPath);
+        if (ongoingVotingsResource == null) {
+            // it is legal that at this stage there is no ongoingvotings node yet 
+            // for example when there was never a voting yet
+            logger.debug("listVotings: no ongoing votings parent resource found");
+            return new ArrayList<VotingView>();
+        }
+        final Iterable<Resource> children = ongoingVotingsResource.getChildren();
+        final Iterator<Resource> it = children.iterator();
+        final List<VotingView> result = new LinkedList<VotingView>();
+        while (it.hasNext()) {
+            Resource aChild = it.next();
+            VotingView c = new VotingView(aChild);
+            result.add(c);
+        }
+        if (logger.isDebugEnabled()) {
+            logger.debug("listVotings: votings found: "
+                    + result.size());
+        }
+        return result;
     }
 
 }

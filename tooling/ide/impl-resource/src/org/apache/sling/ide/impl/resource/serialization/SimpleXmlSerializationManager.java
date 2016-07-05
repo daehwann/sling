@@ -22,6 +22,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.TreeMap;
 
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParser;
@@ -91,10 +94,7 @@ public class SimpleXmlSerializationManager implements SerializationManager, Seri
             saxParser.parse(new InputSource(source), h);
 
             return new ResourceProxy(filePath, h.getResult());
-        } catch (ParserConfigurationException e) {
-            // TODO proper exception handling
-            throw new RuntimeException(e);
-        } catch (SAXException e) {
+        } catch (ParserConfigurationException | SAXException e) {
             // TODO proper exception handling
             throw new RuntimeException(e);
         }
@@ -133,7 +133,8 @@ public class SimpleXmlSerializationManager implements SerializationManager, Seri
             handler.setResult(sr);
             handler.startDocument();
             startElement(handler, TAG_RESOURCE);
-            for (Map.Entry<String, Object> property : content.entrySet()) {
+            Set<Entry<String, Object>> entrySet = new TreeMap<>(content).entrySet();
+            for (Map.Entry<String, Object> property : entrySet) {
                 Object value = property.getValue();
                 if (value instanceof String) {
                     String tagName = property.getKey();
@@ -155,16 +156,20 @@ public class SimpleXmlSerializationManager implements SerializationManager, Seri
 
             // TODO - also add the serialization type
             return new SerializationData(resource.getPath(), CONTENT_XML, result.toByteArray(), null);
-        } catch (TransformerConfigurationException e) {
-            // TODO proper exception handling
-            throw new RuntimeException(e);
-        } catch (TransformerFactoryConfigurationError e) {
-            // TODO proper exception handling
-            throw new RuntimeException(e);
-        } catch (SAXException e) {
+        } catch (TransformerConfigurationException | TransformerFactoryConfigurationError | SAXException e) {
             // TODO proper exception handling
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public String getRepositoryPath(String osPath) {
+        return osPath;
+    }
+
+    @Override
+    public String getOsPath(String repositoryPath) {
+        return repositoryPath;
     }
 
     private void startElement(TransformerHandler handler, String tagName) throws SAXException {
@@ -189,7 +194,7 @@ public class SimpleXmlSerializationManager implements SerializationManager, Seri
 
         @Override
         public void startDocument() throws SAXException {
-            result = new HashMap<String, Object>();
+            result = new HashMap<>();
         }
 
         @Override

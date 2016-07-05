@@ -21,15 +21,28 @@ package org.apache.sling.api.resource;
 import java.util.Collections;
 import java.util.Map;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+
 import org.apache.sling.api.wrappers.ValueMapDecorator;
 
 import aQute.bnd.annotation.ConsumerType;
 
 /**
  * The <code>ValueMap</code> is an easy way to access properties of a resource.
- * With most resources you can use {@link Resource#adaptTo(Class)} to adapt the
- * resource to a value map. The various getter methods can be used to get the
+ * With resources you can use {@link Resource#getValueMap()} to obtain the
+ * value map of a resource. The various getter methods can be used to get the
  * properties of the resource.
+ * <p>
+ * In addition a value map returned by a resource supports getting of deep
+ * values, like get("content/title") which is equivalent to call
+ * getChild("content") on the resource, get the value map of that resource
+ * and call get("title") - but without requiring to do all the checks.
+ * Only the following methods support deep reads: {@link #get(Object)},
+ * {@link #get(String, Class)}, {@link #get(String, Object)} and
+ * {@link #containsKey(Object)}.
+ *
+ * A <code>ValueMap</code> should be immutable.
  */
 @ConsumerType
 public interface ValueMap extends Map<String, Object> {
@@ -48,10 +61,11 @@ public interface ValueMap extends Map<String, Object> {
      *
      * @param name The name of the property
      * @param type The class of the type
+     * @param <T> The class of the type
      * @return Return named value converted to type T or <code>null</code> if
      *         non existing or can't be converted.
      */
-    <T> T get(String name, Class<T> type);
+    @CheckForNull <T> T get(@Nonnull String name, @Nonnull Class<T> type);
 
     /**
      * Get a named property and convert it into the given type.
@@ -60,6 +74,7 @@ public interface ValueMap extends Map<String, Object> {
      * case.
      *
      * @param name The name of the property
+     * @param <T> The expected type
      * @param defaultValue The default value to use if the named property does
      *            not exist or cannot be converted to the requested type. The
      *            default value is also used to define the type to convert the
@@ -68,5 +83,5 @@ public interface ValueMap extends Map<String, Object> {
      * @return Return named value converted to type T or the default value if
      *         non existing or can't be converted.
      */
-    <T> T get(String name, T defaultValue);
+    <T> T get(@Nonnull String name, T defaultValue);
 }

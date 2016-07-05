@@ -224,7 +224,9 @@ public class ResourceUtilTest {
                 if (type == Map.class) {
                     return (Type) map;
                 }
-
+                if (type == ValueMap.class) {
+                    return null;
+                }
                 return super.adaptTo(type);
             }
         };
@@ -256,7 +258,6 @@ public class ResourceUtilTest {
         assertEquals("a/b", ResourceUtil.resourceTypeToPath("a:b"));
     }
 
-    @SuppressWarnings("unchecked")
     @Test public void test_adaptTo() {
         // we define three resources
         // a and b are adaptable to List
@@ -270,12 +271,12 @@ public class ResourceUtilTest {
         final List<Resource> l = new ArrayList<Resource>();
         l.add(a); l.add(b); l.add(c);
         this.context.checking(new Expectations() {{
-            allowing(a).adaptTo(List.class); will(returnValue(new ArrayList()));
-            allowing(b).adaptTo(List.class); will(returnValue(new ArrayList()));
+            allowing(a).adaptTo(List.class); will(returnValue(new ArrayList<Object>()));
+            allowing(b).adaptTo(List.class); will(returnValue(new ArrayList<Object>()));
             allowing(c).adaptTo(List.class); will(returnValue(null));
-            allowing(a).adaptTo(Map.class); will(returnValue(new HashMap()));
-            allowing(b).adaptTo(Map.class); will(returnValue(new HashMap()));
-            allowing(c).adaptTo(Map.class); will(returnValue(new HashMap()));
+            allowing(a).adaptTo(Map.class); will(returnValue(new HashMap<Object, Object>()));
+            allowing(b).adaptTo(Map.class); will(returnValue(new HashMap<Object, Object>()));
+            allowing(c).adaptTo(Map.class); will(returnValue(new HashMap<Object, Object>()));
             allowing(a).adaptTo(Long.class); will(returnValue(null));
             allowing(b).adaptTo(Long.class); will(returnValue(new Long(1)));
             allowing(c).adaptTo(Long.class); will(returnValue(new Long(2)));
@@ -406,10 +407,12 @@ public class ResourceUtilTest {
         assertEquals("/", ResourceUtil.getParent("/b///", 1));
     }
 
+    @SuppressWarnings("deprecation")
     @Test public void testIsA() {
         assertFalse(ResourceUtil.isA(null, "something"));
     }
 
+    @SuppressWarnings("deprecation")
     @Test public void testFindResourceSuperType() {
         assertNull(ResourceUtil.findResourceSuperType(null));
     }

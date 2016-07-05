@@ -65,7 +65,7 @@ public class MimeTypeServiceImpl implements MimeTypeService, BundleListener {
     private static final String PROP_MIME_TYPES = "mime.types";
 
     @Reference(cardinality=ReferenceCardinality.OPTIONAL_UNARY, policy=ReferencePolicy.DYNAMIC)
-    private LogService logService;
+    private volatile LogService logService;
 
     private Map<String, String> mimeTab = new HashMap<String, String>();
 
@@ -210,6 +210,7 @@ public class MimeTypeServiceImpl implements MimeTypeService, BundleListener {
             Dictionary<String, String> props = new Hashtable<String, String>();
             props.put("felix.webconsole.label", MimeTypeWebConsolePlugin.LABEL);
             props.put("felix.webconsole.title", MimeTypeWebConsolePlugin.TITLE);
+            props.put("felix.webconsole.category", "Sling");
             props.put("felix.webconsole.css", MimeTypeWebConsolePlugin.CSS_REFS);
 
             webConsolePluginService = context.getBundleContext().registerService(

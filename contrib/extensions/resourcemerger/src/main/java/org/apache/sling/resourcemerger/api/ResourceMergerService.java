@@ -24,7 +24,9 @@ import aQute.bnd.annotation.ProviderType;
 
 /**
  * Service to handle merged resources.
+ * @deprecated
  */
+@Deprecated
 @ProviderType
 public interface ResourceMergerService {
 
@@ -33,7 +35,7 @@ public interface ResourceMergerService {
      *
      * @param relativePath The relative path
      * @return Returns the merged resource path
-     * @throw IllegalArgumentException if relativePath is <code>null</code> or absolute
+     * @throws IllegalArgumentException if relativePath is <code>null</code> or absolute
      */
     String getMergedResourcePath(String relativePath);
 

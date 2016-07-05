@@ -17,12 +17,13 @@
  */
 package org.apache.sling.hc.core.impl.executor;
 
+import static org.apache.sling.hc.util.FormattingResultLog.msHumanReadable;
+
 import java.util.Date;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.lang.time.StopWatch;
+import org.apache.commons.lang3.time.StopWatch;
 import org.apache.sling.hc.api.HealthCheck;
 import org.apache.sling.hc.api.Result;
 import org.apache.sling.hc.api.execution.HealthCheckExecutionResult;
@@ -50,8 +51,7 @@ class HealthCheckFuture extends FutureTask<ExecutionResult> {
         super(new Callable<ExecutionResult>() {
             @Override
             public ExecutionResult call() throws Exception {
-                Thread.currentThread().setName(
-                        "Health-Check-" + StringUtils.substringAfterLast(metadata.getTitle(), "."));
+                Thread.currentThread().setName("HealthCheck " + metadata.getTitle());
                 LOG.debug("Starting check {}", metadata);
 
                 final StopWatch stopWatch = new StopWatch();
@@ -69,7 +69,7 @@ class HealthCheckFuture extends FutureTask<ExecutionResult> {
                     }
 
                 } catch (final Exception e) {
-                    resultFromHealthCheck = new Result(Result.Status.CRITICAL, "Exception during execution of " + this + ": " + e, e);
+                    resultFromHealthCheck = new Result(Result.Status.CRITICAL, "Exception during execution of '" + metadata.getName() + "': " + e, e);
                 } finally {
                     // unget service ref
                     bundleContext.ungetService(metadata.getServiceReference());
@@ -81,11 +81,11 @@ class HealthCheckFuture extends FutureTask<ExecutionResult> {
                         // wrap the result in an execution result
                         executionResult = new ExecutionResult(metadata, resultFromHealthCheck, elapsedTime);
                     }
-                    LOG.debug("Time consumed for {}: {}", metadata, HealthCheckExecutorImpl.msHumanReadable(elapsedTime));
+                    LOG.debug("Time consumed for {}: {}", metadata, msHumanReadable(elapsedTime));
                 }
 
-                Thread.currentThread().setName("Health-Check-idle");
                 callback.finished(executionResult);
+                Thread.currentThread().setName("HealthCheck idle");
                 return executionResult;
             }
         });

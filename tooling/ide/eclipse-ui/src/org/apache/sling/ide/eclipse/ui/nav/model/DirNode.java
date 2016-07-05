@@ -17,7 +17,6 @@
 package org.apache.sling.ide.eclipse.ui.nav.model;
 
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Set;
 
 import org.eclipse.core.resources.IContainer;
@@ -29,15 +28,28 @@ import de.pdark.decentxml.Element;
 
 public class DirNode extends JcrNode {
 	
-	private static String decode(String name) {
-		if (name.endsWith(".dir")) {
-			return name.substring(0, name.length()-4);
-		} else if (name.equals("_jcr_content")) {
-			return "jcr:content";
-		} else {
-			return null;
-		}
-	}
+    static String encode(String name) {
+        int colon = name.indexOf(":");
+        if (colon==-1) {
+            return name;
+        }
+        return "_" + name.substring(0, colon) + "_" + name.substring(colon+1);
+    }
+
+    static String decode(String name) {
+        if (name.endsWith(".dir")) {
+            return name.substring(0, name.length()-4);
+        } else if (!name.startsWith("_")) {
+            return null;
+        }
+        name = name.substring(1);
+        int pos = name.indexOf("_");
+        if (pos==-1) {
+            return null;
+        }
+        name = name.substring(0, pos) + ":" + name.substring(pos+1);
+        return name;
+    }
 
 	static boolean isDirNode(IResource resource) {
 		if (resource==null) {
@@ -109,9 +121,8 @@ public class DirNode extends JcrNode {
 			final DirNode dirNodeParent = (DirNode)nonDirNodeParent;
 			final String decodedParentName = dirNodeParent.getDecodedName();
 
-			final Set<JcrNode> c = new HashSet<JcrNode>(nonDirNodeParent.parent.children);
-			for (Iterator<JcrNode> it = c.iterator(); it.hasNext();) {
-				final JcrNode node = it.next();
+			final Set<JcrNode> c = new HashSet<>(nonDirNodeParent.parent.children);
+			for (JcrNode node : c) {
 				if (node.getName().equals(decodedParentName)) {
 					nonDirNodeParent = node;
 					continue outerloop;
@@ -132,4 +143,13 @@ public class DirNode extends JcrNode {
 		return false;
 	}
 	
+	@Override
+	public boolean canBeDeleted() {
+        return true;
+	}
+	
+	@Override
+	public String getLabel() {
+	    return getDecodedName();
+	}
 }

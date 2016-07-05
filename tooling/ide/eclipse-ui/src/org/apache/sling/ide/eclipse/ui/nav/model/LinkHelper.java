@@ -29,8 +29,6 @@ import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorReference;
 import org.eclipse.ui.IFileEditorInput;
-import org.eclipse.ui.IPageLayout;
-import org.eclipse.ui.IViewPart;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.ide.ResourceUtil;
@@ -98,18 +96,18 @@ public class LinkHelper implements ILinkHelper {
 		}
 		final JcrNode node = (JcrNode) selectedElement;
 		// bring properties view to top, if it is open
-		IViewPart propertiesView = aPage.findView(IPageLayout.ID_PROP_SHEET);
-		if (propertiesView!=null) {
-			aPage.bringToTop(propertiesView);
-		}
+		// SLING-3641 : moved link-with-editor behavior to the JCR Properties view atm
+		//TODO: to be reviewed at a later stage with SLING-3641
+//		IViewPart propertiesView = aPage.findView(IPageLayout.ID_PROP_SHEET);
+//		if (propertiesView!=null) {
+//			aPage.bringToTop(propertiesView);
+//		}
 		final IResource resource = node.getResource();
 		if (resource==null || !(resource instanceof IFile)) {
 			return;
 		}
 		final IFile selectedFile = (IFile)resource;
-		final IEditorReference[] editorReferences = aPage.getEditorReferences();
-		for (int i = 0; i < editorReferences.length; i++) {
-			final IEditorReference reference = editorReferences[i];
+		for (final IEditorReference reference : aPage.getEditorReferences()) {
 			if (reference==null) {
 				continue;
 			}
